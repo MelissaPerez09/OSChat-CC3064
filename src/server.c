@@ -31,6 +31,30 @@ client_t *clients[MAX_CLIENTS];
 int uid = 10;  // Unique identifier for each client
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+bool username_exists(const char* username) {
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < MAX_CLIENTS; ++i) {
+        if (clients[i] && strcmp(clients[i]->name, username) == 0) {
+            pthread_mutex_unlock(&clients_mutex);
+            return true;
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+    return false;
+}
+
+void send_response(int sockfd, Chat__StatusCode status_code, const char *message) {
+    Chat__Response response = CHAT__RESPONSE__INIT;
+    response.status_code = status_code;
+    response.message = strdup(message); // Ensure the message is copied
+    size_t len = chat__response__get_packed_size(&response);
+    uint8_t *buffer = malloc(len);
+    chat__response__pack(&response, buffer);
+    send(sockfd, buffer, len, 0);
+    free(buffer);
+    free(response.message); // Free the duplicated message
+}
+
 void add_client(client_t *cl) {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < MAX_CLIENTS; ++i) {
@@ -46,6 +70,7 @@ void remove_client(int uid) {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < MAX_CLIENTS; ++i) {
         if (clients[i] && clients[i]->uid == uid) {
+            printf("Client disconnected: %s (IP: %s)\n", clients[i]->name, inet_ntoa(clients[i]->address.sin_addr));
             clients[i] = NULL;
             break;
         }
@@ -59,55 +84,10 @@ void *handle_client(void *arg) {
     int len; // Declare len outside the loop
 
     while ((len = recv(cli->sockfd, buffer, sizeof(buffer), 0)) > 0) {
-        Chat__Request *req = chat__request__unpack(NULL, len, buffer);
-        if (req == NULL) {
-            fprintf(stderr, "Error deserializing request\n");
-            continue;
-        }
-
-        if (req->payload_case == CHAT__REQUEST__PAYLOAD_REGISTER_USER) {
-            pthread_mutex_lock(&clients_mutex);
-            bool username_exists = false;
-            for (int i = 0; i < MAX_CLIENTS; ++i) {
-                if (clients[i] && strcmp(clients[i]->name, req->register_user->username) == 0) {
-                    username_exists = true;
-                    break;
-                }
-            }
-            if (username_exists) {
-                fprintf(stderr, "Username already taken\n");
-                Chat__Response response = CHAT__RESPONSE__INIT;
-                response.status_code = CHAT__STATUS_CODE__BAD_REQUEST;
-                response.message = "Username already taken";
-                size_t resp_len = chat__response__get_packed_size(&response);
-                uint8_t *resp_buf = malloc(resp_len);
-                chat__response__pack(&response, resp_buf);
-                printf("Sending error response to client...\n"); // Debug message
-                send(cli->sockfd, resp_buf, resp_len, 0);
-                free(resp_buf);
-
-                // Close the connection after sending the error response
-                close(cli->sockfd);
-                printf("Client connection closed due to username conflict.\n"); // Debug message
-                free(cli);
-                pthread_mutex_unlock(&clients_mutex);
-                pthread_detach(pthread_self());
-                return NULL;
-            } else {
-                strcpy(cli->name, req->register_user->username);
-                cli->uid = uid++;
-                char *client_ip = inet_ntoa(cli->address.sin_addr);
-                printf("User %s (IP: %s) has joined\n", cli->name, client_ip);
-                add_client(cli);  // Add the client to the list
-            }
-            pthread_mutex_unlock(&clients_mutex);
-        }
-
-        chat__request__free_unpacked(req, NULL);
+        // Process incoming messages...
     }
 
     if (len == 0) {
-        printf("Client disconnected: %s (IP: %s)\n", cli->name[0] ? cli->name : "Unknown", inet_ntoa(cli->address.sin_addr));
         remove_client(cli->uid);
         close(cli->sockfd);
         free(cli);
@@ -121,11 +101,9 @@ void *handle_client(void *arg) {
 int main() {
     int listenfd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in serv_addr = {0};
-
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons(PORT);
-
     bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
     listen(listenfd, 10);
 
@@ -142,8 +120,30 @@ int main() {
             continue;
         }
 
-        pthread_t tid;
-        pthread_create(&tid, NULL, &handle_client, (void*)cli);
+        uint8_t buffer[1024];
+        int len = recv(cli->sockfd, buffer, sizeof(buffer), 0);
+        if (len > 0) {
+            Chat__Request *req = chat__request__unpack(NULL, len, buffer);
+            if (req && req->payload_case == CHAT__REQUEST__PAYLOAD_REGISTER_USER) {
+                if (!username_exists(req->register_user->username)) {
+                    strcpy(cli->name, req->register_user->username);
+                    cli->uid = uid++;
+                    printf("New connection: %s (IP: %s)\n", cli->name, inet_ntoa(cli->address.sin_addr));
+                    add_client(cli);
+                    send_response(cli->sockfd, CHAT__STATUS_CODE__OK, "Registration successful");
+                    pthread_t tid;
+                    pthread_create(&tid, NULL, &handle_client, (void*)cli);
+                } else {
+                    send_response(cli->sockfd, CHAT__STATUS_CODE__BAD_REQUEST, "User is already connected");
+                    close(cli->sockfd);
+                    free(cli);
+                }
+            }
+            chat__request__free_unpacked(req, NULL);
+        } else {
+            close(cli->sockfd);
+            free(cli);
+        }
     }
 
     return 0;

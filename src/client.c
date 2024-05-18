@@ -13,6 +13,7 @@
 #include "chat.pb-c.h"
 
 #define PORT 8080
+#define BUFFER_SIZE 1024
 
 void register_user(int sockfd, const char *username) {
     Chat__Request request = CHAT__REQUEST__INIT;
@@ -28,6 +29,30 @@ void register_user(int sockfd, const char *username) {
 
     send(sockfd, buffer, len, 0);
     free(buffer);
+    //printf("Registration request sent for username '%s'.\n", username);
+}
+
+int receive_server_response(int sockfd) {
+    uint8_t buffer[BUFFER_SIZE];
+    int len = recv(sockfd, buffer, BUFFER_SIZE, 0);
+    if (len > 0) {
+        Chat__Response *response = chat__response__unpack(NULL, len, buffer);
+        if (response) {
+            //printf("Received server response: %s\n", response->message);
+            if (response->status_code == CHAT__STATUS_CODE__BAD_REQUEST) {
+                fprintf(stderr, "Error: %s\n", response->message);
+                chat__response__free_unpacked(response, NULL);
+                return -1;
+            }
+            chat__response__free_unpacked(response, NULL);
+            return 0;
+        }
+    } else if (len == 0) {
+        printf("Server closed the connection.\n");
+    } else {
+        perror("recv failed");
+    }
+    return -1;
 }
 
 int main(int argc, char *argv[]) {
@@ -53,19 +78,23 @@ int main(int argc, char *argv[]) {
 
     register_user(sockfd, username);
 
-    printf("Registered as %s. You can start sending messages.\n", username);
+    if (receive_server_response(sockfd) == 0) {
+        printf("Registered as %s. You can start sending messages.\n", username);
 
-    char message[256];
-    while (1) {
-        printf("Type a message (or 'exit' to quit): ");
-        fgets(message, sizeof(message), stdin);
-        message[strcspn(message, "\n")] = '\0';
+        char message[256];
+        while (1) {
+            printf("Type a message (or 'exit' to quit): ");
+            fgets(message, sizeof(message), stdin);
+            message[strcspn(message, "\n")] = '\0';
 
-        if (strcmp(message, "exit") == 0) {
-            close(sockfd);
-            printf("Disconnecting...\n");
-            break;
+            if (strcmp(message, "exit") == 0) {
+                close(sockfd);
+                printf("Disconnecting...\n");
+                break;
+            }
         }
+    } else {
+        close(sockfd);  // Close the connection on failure
     }
 
     return 0;
