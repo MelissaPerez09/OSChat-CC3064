@@ -28,7 +28,7 @@ typedef struct {
 } client_t;
 
 client_t *clients[MAX_CLIENTS];
-int uid = 10;  // Unique identifier for each client
+int uid = 10;
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 bool username_exists(const char* username) {
@@ -46,13 +46,13 @@ bool username_exists(const char* username) {
 void send_response(int sockfd, Chat__StatusCode status_code, const char *message) {
     Chat__Response response = CHAT__RESPONSE__INIT;
     response.status_code = status_code;
-    response.message = strdup(message); // Ensure the message is copied
+    response.message = strdup(message);
     size_t len = chat__response__get_packed_size(&response);
     uint8_t *buffer = malloc(len);
     chat__response__pack(&response, buffer);
     send(sockfd, buffer, len, 0);
     free(buffer);
-    free(response.message); // Free the duplicated message
+    free(response.message);
 }
 
 void add_client(client_t *cl) {
@@ -78,13 +78,63 @@ void remove_client(int uid) {
     pthread_mutex_unlock(&clients_mutex);
 }
 
+void send_user_list(int sockfd) {
+    pthread_mutex_lock(&clients_mutex);
+    size_t num_users = 0;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i]) num_users++;
+    }
+
+    Chat__User **users = malloc(num_users * sizeof(Chat__User *));
+    for (int i = 0, j = 0; i < MAX_CLIENTS && j < num_users; i++) {
+        if (clients[i]) {
+            users[j] = malloc(sizeof(Chat__User));
+            chat__user__init(users[j]);
+            users[j]->username = strdup(clients[i]->name);
+            users[j]->status = CHAT__USER_STATUS__ONLINE;
+            j++;
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+
+    Chat__UserListResponse user_list_response = CHAT__USER_LIST_RESPONSE__INIT;
+    user_list_response.n_users = num_users;
+    user_list_response.users = users;
+    user_list_response.type = CHAT__USER_LIST_TYPE__ALL;
+
+    size_t len = chat__user_list_response__get_packed_size(&user_list_response);
+    uint8_t *buffer = malloc(len);
+    chat__user_list_response__pack(&user_list_response, buffer);
+    send(sockfd, buffer, len, 0);
+    free(buffer);
+
+    for (int i = 0; i < num_users; i++) {
+        free(users[i]->username);
+        free(users[i]);
+    }
+    free(users);
+}
+
 void *handle_client(void *arg) {
     client_t *cli = (client_t *)arg;
     uint8_t buffer[1024];
-    int len; // Declare len outside the loop
+    int len;
 
     while ((len = recv(cli->sockfd, buffer, sizeof(buffer), 0)) > 0) {
-        // Process incoming messages...
+        Chat__Request *req = chat__request__unpack(NULL, len, buffer);
+        if (req == NULL) {
+            fprintf(stderr, "Error unpacking incoming message\n");
+            continue;
+        }
+
+        switch (req->operation) {
+            case CHAT__OPERATION__GET_USERS:
+                send_user_list(cli->sockfd);
+                break;
+            
+        }
+
+        chat__request__free_unpacked(req, NULL);
     }
 
     if (len == 0) {
@@ -116,7 +166,7 @@ int main() {
 
         if (cli->sockfd < 0) {
             perror("Accept failed");
-            free(cli); // Free memory if accept fails
+            free(cli);
             continue;
         }
 

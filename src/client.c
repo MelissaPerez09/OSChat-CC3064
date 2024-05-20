@@ -15,6 +15,17 @@
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
+void menu() {
+    printf("\n----------------------------------\n1. Chat with everyone (broadcast)\n");
+    printf("2. Send a direct message\n");
+    printf("3. Change Status\n");
+    printf("4. View connected users\n");
+    printf("5. See user information\n");
+    printf("6. Help\n");
+    printf("7. Exit\n");
+    printf("----------------------------------\nSelect an option: ");
+}
+
 void register_user(int sockfd, const char *username) {
     Chat__Request request = CHAT__REQUEST__INIT;
     request.operation = CHAT__OPERATION__REGISTER_USER;
@@ -30,6 +41,19 @@ void register_user(int sockfd, const char *username) {
     send(sockfd, buffer, len, 0);
     free(buffer);
     //printf("Registration request sent for username '%s'.\n", username);
+}
+
+void request_user_list(int sockfd) {
+    Chat__Request request = CHAT__REQUEST__INIT;
+    request.operation = CHAT__OPERATION__GET_USERS;
+    request.payload_case = CHAT__REQUEST__PAYLOAD_GET_USERS;
+
+    size_t len = chat__request__get_packed_size(&request);
+    uint8_t *buffer = malloc(len);
+    chat__request__pack(&request, buffer);
+
+    send(sockfd, buffer, len, 0);
+    free(buffer);
 }
 
 int receive_server_response(int sockfd) {
@@ -63,7 +87,6 @@ int main(int argc, char *argv[]) {
 
     const char *server_ip = argv[1];
     const char *username = argv[2];
-
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in serv_addr = {0};
 
@@ -77,24 +100,52 @@ int main(int argc, char *argv[]) {
     }
 
     register_user(sockfd, username);
+    if (receive_server_response(sockfd) != 0) {
+        close(sockfd);
+        return 1;
+    }
 
-    if (receive_server_response(sockfd) == 0) {
-        printf("Registered as %s. You can start sending messages.\n", username);
+    printf("\nRegistered as %s. Welcome to the chat!\n", username);
 
-        char message[256];
-        while (1) {
-            printf("Type a message (or 'exit' to quit): ");
-            fgets(message, sizeof(message), stdin);
-            message[strcspn(message, "\n")] = '\0';
+    while (1) {
+        menu();
 
-            if (strcmp(message, "exit") == 0) {
-                close(sockfd);
-                printf("Disconnecting...\n");
+        int option;
+        scanf("%d", &option);
+        getchar();
+
+        switch (option) {
+            case 1:
+                // TODO: Implement chat with everyone (broadcast)
                 break;
-            }
+            case 2:
+                // TODO: Implement send a direct message
+                break;
+            case 3:
+                // TODO: Implement change status
+                break;
+            case 4:
+                request_user_list(sockfd);
+                if (receive_server_response(sockfd) != 0) {
+                    printf("\nConnection error or server closed the connection.\n");
+                    close(sockfd);
+                    exit(1);
+                }
+                break;
+            case 5:
+                // TODO: Implement see user information
+                break;
+            case 6:
+                printf("\nHELP!: \n1 - Broadcast message to all\n2 - Send a direct message to a user\n3 - Change your status\n4 - View all connected users in the server\n5 - Get information about a specific user\n6 - Display this help\n7 - Exit the chat\n");
+                break;
+            case 7:
+                close(sockfd);
+                printf("\nDisconnected from server.\n");
+                exit(0);
+            default:
+                printf("Invalid option. Please try again.\n");
+                break;
         }
-    } else {
-        close(sockfd);  // Close the connection on failure
     }
 
     return 0;
