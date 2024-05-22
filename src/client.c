@@ -56,6 +56,22 @@ void request_user_list(int sockfd) {
     free(buffer);
 }
 
+void update_status(int sockfd, const char *username, Chat__UserStatus new_status) {
+    Chat__Request request = CHAT__REQUEST__INIT;
+    request.operation = CHAT__OPERATION__UPDATE_STATUS;
+    Chat__UpdateStatusRequest update_status_request = CHAT__UPDATE_STATUS_REQUEST__INIT;
+    update_status_request.username = (char *)username;
+    update_status_request.new_status = new_status;
+    request.update_status = &update_status_request;
+    request.payload_case = CHAT__REQUEST__PAYLOAD_UPDATE_STATUS;
+
+    size_t len = chat__request__get_packed_size(&request);
+    uint8_t *buffer = malloc(len);
+    chat__request__pack(&request, buffer);
+    send(sockfd, buffer, len, 0);
+    free(buffer);
+}
+
 int receive_server_response(int sockfd) {
     uint8_t buffer[BUFFER_SIZE];
     int len = recv(sockfd, buffer, BUFFER_SIZE, 0);
@@ -122,9 +138,24 @@ int main(int argc, char *argv[]) {
                 // TODO: Implement send a direct message
                 break;
             case 3:
-                // TODO: Implement change status
+                // Change status
+                printf("Choose new status (0: ONLINE, 1: BUSY, 2: OFFLINE): ");
+                int new_status;
+                scanf("%d", &new_status);
+                char* status_names[] = {"ONLINE", "BUSY", "OFFLINE"};
+                if (new_status >= 0 && new_status <= 2) {
+                    update_status(sockfd, username, new_status);
+                    if (receive_server_response(sockfd) == 0) {
+                        printf("\nStatus updated to %s.\n", status_names[new_status]);
+                    } else {
+                        printf("\nFailed to update status.\n");
+                    }
+                } else {
+                    printf("Invalid status. Please try again.\n");
+                }
                 break;
             case 4:
+                // View connected users
                 request_user_list(sockfd);
                 if (receive_server_response(sockfd) != 0) {
                     printf("\nConnection error or server closed the connection.\n");
@@ -136,9 +167,11 @@ int main(int argc, char *argv[]) {
                 // TODO: Implement see user information
                 break;
             case 6:
+                // Display help
                 printf("\nHELP!: \n1 - Broadcast message to all\n2 - Send a direct message to a user\n3 - Change your status\n4 - View all connected users in the server\n5 - Get information about a specific user\n6 - Display this help\n7 - Exit the chat\n");
                 break;
             case 7:
+                // Exit the chat
                 close(sockfd);
                 printf("\nDisconnected from server.\n");
                 exit(0);

@@ -15,16 +15,35 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <time.h>
 #include "chat.pb-c.h"
 
 #define PORT 8080
 #define MAX_CLIENTS 100
+#define INACTIVITY_TIMEOUT 5
+
+typedef enum {
+    ACTIVO = 0,   // En línea y disponible para recibir mensajes
+    OCUPADO = 1,  // En línea pero marcado como ocupado, puede no responder de inmediato
+    INACTIVO = 2  // Desconectado y no puede recibir mensajes
+} ClientStatus;
+
+const char* get_status_name(ClientStatus status) {
+    switch (status) {
+        case ACTIVO: return "ONLINE";
+        case OCUPADO: return "BUSY";
+        case INACTIVO: return "OFFLINE";
+        default: return "UNKNOWN";
+    }
+}
 
 typedef struct {
     struct sockaddr_in address;
     int sockfd;
     int uid;
     char name[32];
+    time_t last_active;
+    ClientStatus status;
 } client_t;
 
 client_t *clients[MAX_CLIENTS];
@@ -70,7 +89,7 @@ void remove_client(int uid) {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < MAX_CLIENTS; ++i) {
         if (clients[i] && clients[i]->uid == uid) {
-            printf("Client disconnected: %s (IP: %s)\n", clients[i]->name, inet_ntoa(clients[i]->address.sin_addr));
+            printf("\n(*) Client disconnected: %s (IP: %s)\n", clients[i]->name, inet_ntoa(clients[i]->address.sin_addr));
             clients[i] = NULL;
             break;
         }
@@ -91,7 +110,7 @@ void send_user_list(int sockfd) {
             users[j] = malloc(sizeof(Chat__User));
             chat__user__init(users[j]);
             users[j]->username = strdup(clients[i]->name);
-            users[j]->status = CHAT__USER_STATUS__ONLINE;
+            users[j]->status = clients[i]->status;
             j++;
         }
     }
@@ -115,12 +134,35 @@ void send_user_list(int sockfd) {
     free(users);
 }
 
+void* check_inactivity(void* arg) {
+    while (1) {
+        sleep(1);
+        time_t now = time(NULL);
+        pthread_mutex_lock(&clients_mutex);
+        for (int i = 0; i < MAX_CLIENTS; ++i) {
+            if (clients[i] && difftime(now, clients[i]->last_active) > INACTIVITY_TIMEOUT) {
+                if (clients[i]->status != INACTIVO) {
+                    clients[i]->status = INACTIVO;
+                    printf("%s has been set OFFLINE due to inactivity.\n", clients[i]->name);
+                    char message[256];
+                    sprintf(message, "Your status has been changed to OFFLINE due to inactivity.");
+                    send_response(clients[i]->sockfd, CHAT__STATUS_CODE__OK, message);
+                }
+            }
+        }
+        pthread_mutex_unlock(&clients_mutex);
+    }
+    return NULL;
+}
+
 void *handle_client(void *arg) {
     client_t *cli = (client_t *)arg;
+    cli->last_active = time(NULL);
     uint8_t buffer[1024];
     int len;
 
     while ((len = recv(cli->sockfd, buffer, sizeof(buffer), 0)) > 0) {
+        cli->last_active = time(NULL);
         Chat__Request *req = chat__request__unpack(NULL, len, buffer);
         if (req == NULL) {
             fprintf(stderr, "Error unpacking incoming message\n");
@@ -128,10 +170,28 @@ void *handle_client(void *arg) {
         }
 
         switch (req->operation) {
+            // Enviar la lista de usuarios conectados
             case CHAT__OPERATION__GET_USERS:
                 send_user_list(cli->sockfd);
                 break;
             
+            // Cambiar el estado de un usuario
+            case CHAT__OPERATION__UPDATE_STATUS: {
+                if (req->update_status && username_exists(req->update_status->username)) {
+                    for (int i = 0; i < MAX_CLIENTS; ++i) {
+                        if (clients[i] && strcmp(clients[i]->name, req->update_status->username) == 0) {
+                            ClientStatus old_status = clients[i]->status; // Guarda el estado antiguo
+                            clients[i]->status = req->update_status->new_status; // Actualiza al nuevo estado
+                            send_response(cli->sockfd, CHAT__STATUS_CODE__OK, "\nStatus updated successfully!");
+                            printf("\nUpdated status for %s from %s to %s\n", clients[i]->name, get_status_name(old_status), get_status_name(clients[i]->status));
+                            break;
+                        }
+                    }
+                } else {
+                    send_response(cli->sockfd, CHAT__STATUS_CODE__BAD_REQUEST, "User not found");
+                }
+                break;
+            }
         }
 
         chat__request__free_unpacked(req, NULL);
@@ -158,6 +218,8 @@ int main() {
     listen(listenfd, 10);
 
     printf("Server started on port %d\n", PORT);
+    pthread_t tid_inactivity;
+    pthread_create(&tid_inactivity, NULL, &check_inactivity, NULL); 
 
     while (1) {
         client_t *cli = malloc(sizeof(client_t));
@@ -178,13 +240,13 @@ int main() {
                 if (!username_exists(req->register_user->username)) {
                     strcpy(cli->name, req->register_user->username);
                     cli->uid = uid++;
-                    printf("New connection: %s (IP: %s)\n", cli->name, inet_ntoa(cli->address.sin_addr));
+                    printf("\n(*) New connection: %s (IP: %s)\n", cli->name, inet_ntoa(cli->address.sin_addr));
                     add_client(cli);
                     send_response(cli->sockfd, CHAT__STATUS_CODE__OK, "Registration successful");
                     pthread_t tid;
                     pthread_create(&tid, NULL, &handle_client, (void*)cli);
                 } else {
-                    send_response(cli->sockfd, CHAT__STATUS_CODE__BAD_REQUEST, "User is already connected");
+                    send_response(cli->sockfd, CHAT__STATUS_CODE__BAD_REQUEST, "(!)User is already connected");
                     close(cli->sockfd);
                     free(cli);
                 }
