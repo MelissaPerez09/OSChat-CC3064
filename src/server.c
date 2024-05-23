@@ -92,10 +92,11 @@ void remove_client(int uid) {
             printf("\n(*) Client disconnected: %s (IP: %s)\n", clients[i]->name, inet_ntoa(clients[i]->address.sin_addr));
             clients[i] = NULL;
             break;
-        }
+        } 
     }
     pthread_mutex_unlock(&clients_mutex);
 }
+
 
 void send_user_list(int sockfd) {
     pthread_mutex_lock(&clients_mutex);
@@ -205,13 +206,11 @@ void *handle_client(void *arg) {
         chat__request__free_unpacked(req, NULL);
     }
 
-    if (len == 0) {
+    if (len <= 0) {
         remove_client(cli->uid);
         close(cli->sockfd);
         free(cli);
         pthread_detach(pthread_self());
-    } else {
-        perror("recv failed");
     }
     return NULL;
 }
@@ -222,6 +221,11 @@ int main() {
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons(PORT);
+
+    int opt = 1;
+    // Configuración para reutilizar la dirección IP y puerto
+    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
     bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
     listen(listenfd, 10);
 
