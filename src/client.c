@@ -43,7 +43,7 @@ void register_user(int sockfd, const char *username) {
     //printf("Registration request sent for username '%s'.\n", username);
 }
 
-void request_user_list(int sockfd) {
+int request_user_list(int sockfd) {
     Chat__Request request = CHAT__REQUEST__INIT;
     request.operation = CHAT__OPERATION__GET_USERS;
     request.payload_case = CHAT__REQUEST__PAYLOAD_GET_USERS;
@@ -54,7 +54,39 @@ void request_user_list(int sockfd) {
 
     send(sockfd, buffer, len, 0);
     free(buffer);
+
+    // Recibir y procesar la respuesta
+    uint8_t response_buffer[BUFFER_SIZE];
+    len = recv(sockfd, response_buffer, BUFFER_SIZE, 0);
+    if (len > 0) {
+        Chat__Response *response = chat__response__unpack(NULL, len, response_buffer);
+        if (response) {
+            if (response->status_code == CHAT__STATUS_CODE__BAD_REQUEST) {
+                fprintf(stderr, "Error: %s\n", response->message);
+                chat__response__free_unpacked(response, NULL);
+                return -1;
+            }
+            if (response->result_case == CHAT__RESPONSE__RESULT_USER_LIST) {
+                Chat__UserListResponse *user_list = response->user_list;
+                printf("\nConnected Users:\n");
+                for (size_t i = 0; i < user_list->n_users; i++) {
+                    printf("User: %s, Status: %d\n", user_list->users[i]->username, user_list->users[i]->status);
+                }
+                chat__response__free_unpacked(response, NULL);
+                return 0;  // Success
+            }
+            chat__response__free_unpacked(response, NULL);
+        }
+    } else if (len == 0) {
+        printf("Server closed the connection.\n");
+        return -1;
+    } else {
+        perror("recv failed");
+        return -1;
+    }
+    return 0;  // No hubo errores, pero tampoco se recibió una lista de usuarios
 }
+
 
 void update_status(int sockfd, const char *username, Chat__UserStatus new_status) {
     Chat__Request request = CHAT__REQUEST__INIT;
@@ -78,21 +110,33 @@ int receive_server_response(int sockfd) {
     if (len > 0) {
         Chat__Response *response = chat__response__unpack(NULL, len, buffer);
         if (response) {
-            //printf("Received server response: %s\n", response->message);
+            printf("Received server response: %s\n", response->message);
             if (response->status_code == CHAT__STATUS_CODE__BAD_REQUEST) {
                 fprintf(stderr, "Error: %s\n", response->message);
                 chat__response__free_unpacked(response, NULL);
                 return -1;
             }
+
+            if (response->result_case == CHAT__RESPONSE__RESULT_USER_LIST) {
+                Chat__UserListResponse *user_list = response->user_list;
+                printf("\nConnected Users:\n");
+                for (size_t i = 0; i < user_list->n_users; i++) {
+                    printf("User: %s, Status: %d\n", user_list->users[i]->username, user_list->users[i]->status);
+                }
+                chat__response__free_unpacked(response, NULL);
+                return 0;  // Return 0 to indicate success
+            }
+
             chat__response__free_unpacked(response, NULL);
             return 0;
         }
     } else if (len == 0) {
         printf("Server closed the connection.\n");
+        return -1;
     } else {
         perror("recv failed");
+        return -1;
     }
-    return -1;
 }
 
 int main(int argc, char *argv[]) {
@@ -155,14 +199,10 @@ int main(int argc, char *argv[]) {
                 }
                 break;
             case 4:
-                // View connected users
+                // Solicitar la lista de usuarios conectados
                 request_user_list(sockfd);
-                if (receive_server_response(sockfd) != 0) {
-                    printf("\nConnection error or server closed the connection.\n");
-                    close(sockfd);
-                    exit(1);
-                }
                 break;
+
             case 5:
                 // TODO: Implement see user information
                 break;

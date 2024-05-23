@@ -105,7 +105,8 @@ void send_user_list(int sockfd) {
     }
 
     Chat__User **users = malloc(num_users * sizeof(Chat__User *));
-    for (int i = 0, j = 0; i < MAX_CLIENTS && j < num_users; i++) {
+    size_t j = 0;
+    for (int i = 0; i < MAX_CLIENTS && j < num_users; i++) {
         if (clients[i]) {
             users[j] = malloc(sizeof(Chat__User));
             chat__user__init(users[j]);
@@ -121,9 +122,15 @@ void send_user_list(int sockfd) {
     user_list_response.users = users;
     user_list_response.type = CHAT__USER_LIST_TYPE__ALL;
 
-    size_t len = chat__user_list_response__get_packed_size(&user_list_response);
+    Chat__Response response = CHAT__RESPONSE__INIT;
+    response.operation = CHAT__OPERATION__GET_USERS;
+    response.status_code = CHAT__STATUS_CODE__OK;
+    response.result_case = CHAT__RESPONSE__RESULT_USER_LIST;
+    response.user_list = &user_list_response;
+
+    size_t len = chat__response__get_packed_size(&response);
     uint8_t *buffer = malloc(len);
-    chat__user_list_response__pack(&user_list_response, buffer);
+    chat__response__pack(&response, buffer);
     send(sockfd, buffer, len, 0);
     free(buffer);
 
@@ -133,6 +140,7 @@ void send_user_list(int sockfd) {
     }
     free(users);
 }
+
 
 void* check_inactivity(void* arg) {
     while (1) {
