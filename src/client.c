@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include "chat.pb-c.h"
+#include <pthread.h>
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
@@ -36,6 +37,24 @@ void print_user_info(char* full_username) {
         }
     }
 }
+
+void send_broadcast_message(int sockfd, const char *message) {
+    Chat__Request request = CHAT__REQUEST__INIT;
+    request.operation = CHAT__OPERATION__SEND_MESSAGE;
+    Chat__SendMessageRequest send_message_request = CHAT__SEND_MESSAGE_REQUEST__INIT;
+    send_message_request.recipient = ""; // Campo vacío para broadcast
+    send_message_request.content = (char *)message;
+    request.send_message = &send_message_request;
+    request.payload_case = CHAT__REQUEST__PAYLOAD_SEND_MESSAGE;
+
+    size_t len = chat__request__get_packed_size(&request);
+    uint8_t *buffer = malloc(len);
+    chat__request__pack(&request, buffer);
+
+    send(sockfd, buffer, len, 0);
+    free(buffer);
+}
+
 
 void register_user(int sockfd, const char *username) {
     Chat__Request request = CHAT__REQUEST__INIT;
@@ -124,6 +143,25 @@ void clear_buffer(uint8_t *buffer, size_t size) {
 // Añade la declaración de la nueva función aquí
 int handle_recv_errors(int len);
 
+void *receive_messages(void *sockfd) {
+    int server_sockfd = *(int *)sockfd;
+    char buffer[1024];
+
+    while (1) {
+        clear_buffer(buffer, sizeof(buffer));
+        int len = recv(server_sockfd, buffer, sizeof(buffer), 0);
+        if (len > 0) {
+            printf("%s", buffer);
+        } else if (len == 0) {
+            printf("Server closed the connection.\n");
+            break;
+        } else {
+            perror("recv failed");
+            break;
+        }
+    }
+    return NULL;
+}
 
 
 int receive_user_info_response(int sockfd) {
@@ -228,6 +266,11 @@ int main(int argc, char *argv[]) {
 
     printf("\nRegistered as %s. Welcome to the chat!\n", username);
 
+    pthread_t recv_thread;
+    if(pthread_create(&recv_thread, NULL, receive_messages, (void *)&sockfd) != 0) {
+        fprintf(stderr, "Failed to create thread for receiving messages.\n");
+    }
+
     while (1) {
         menu();
 
@@ -236,9 +279,14 @@ int main(int argc, char *argv[]) {
         getchar();
 
         switch (option) {
-            case 1:
-                // TODO: Implement chat with everyone (broadcast)
+            case 1: {
+                printf("Enter your message: ");
+                char message[256];
+                fgets(message, sizeof(message), stdin);
+                message[strcspn(message, "\n")] = 0; // Eliminar el carácter de nueva línea
+                send_broadcast_message(sockfd, message);
                 break;
+            }
             case 2:
                 // TODO: Implement send a direct message
                 break;

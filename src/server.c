@@ -160,6 +160,15 @@ void send_user_list(int sockfd, Chat__UserListRequest *request) {
     free(users);
 }
 
+void broadcast_message(char *sender_name, char *message) {
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i] && strcmp(clients[i]->name, sender_name) != 0) { // No reenviar al emisor
+            send(clients[i]->sockfd, message, strlen(message), 0);
+        }
+    }
+    pthread_mutex_unlock(&clients_mutex);
+}
 
 
 void* check_inactivity(void* arg) {
@@ -225,6 +234,13 @@ void *handle_client(void *arg) {
                 }
                 break;
             }
+            case CHAT__OPERATION__SEND_MESSAGE:
+                if (req->send_message) {
+                    char broadcast_msg[1024];
+                    snprintf(broadcast_msg, sizeof(broadcast_msg), "\n > Broadcast Message from %s: %s\n", cli->name, req->send_message->content);
+                    broadcast_message(cli->name, broadcast_msg);
+                }
+                break;
         }
 
         chat__request__free_unpacked(req, NULL);
