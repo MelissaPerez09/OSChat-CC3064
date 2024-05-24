@@ -163,6 +163,23 @@ void *receive_messages(void *sockfd) {
     return NULL;
 }
 
+void send_direct_message(int sockfd, const char *recipient, const char *message) {
+    Chat__Request request = CHAT__REQUEST__INIT;
+    request.operation = CHAT__OPERATION__SEND_MESSAGE;
+    Chat__SendMessageRequest send_message_request = CHAT__SEND_MESSAGE_REQUEST__INIT;
+    send_message_request.recipient = (char *)recipient;  // Especificar destinatario
+    send_message_request.content = (char *)message;
+    request.send_message = &send_message_request;
+    request.payload_case = CHAT__REQUEST__PAYLOAD_SEND_MESSAGE;
+
+    size_t len = chat__request__get_packed_size(&request);
+    uint8_t *buffer = malloc(len);
+    chat__request__pack(&request, buffer);
+
+    send(sockfd, buffer, len, 0);
+    free(buffer);
+}
+
 
 int receive_user_info_response(int sockfd) {
     uint8_t buffer[BUFFER_SIZE];
@@ -287,9 +304,21 @@ int main(int argc, char *argv[]) {
                 send_broadcast_message(sockfd, message);
                 break;
             }
-            case 2:
-                // TODO: Implement send a direct message
+            case 2: {
+                char recipient[32];
+                printf("Enter the username to send message: ");
+                fgets(recipient, sizeof(recipient), stdin);
+                recipient[strcspn(recipient, "\n")] = 0;  // Remove newline character
+
+                printf("Enter your message: ");
+                char message[256];
+                fgets(message, sizeof(message), stdin);
+                message[strcspn(message, "\n")] = 0;  // Remove newline character
+
+                send_direct_message(sockfd, recipient, message);
                 break;
+            }
+
             case 3:
                 // Change status
                 printf("Choose new status (0: ONLINE, 1: BUSY, 2: OFFLINE): ");

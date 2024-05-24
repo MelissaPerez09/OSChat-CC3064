@@ -236,11 +236,34 @@ void *handle_client(void *arg) {
             }
             case CHAT__OPERATION__SEND_MESSAGE:
                 if (req->send_message) {
-                    char broadcast_msg[1024];
-                    snprintf(broadcast_msg, sizeof(broadcast_msg), "\n > Broadcast Message from %s: %s\n", cli->name, req->send_message->content);
-                    broadcast_message(cli->name, broadcast_msg);
+                    if (strlen(req->send_message->recipient) > 0) {
+                        // Enviar a un usuario específico
+                        char dm_msg[1024];
+                        snprintf(dm_msg, sizeof(dm_msg), "\n> DM from %s: %s\n", cli->name, req->send_message->content);
+                        bool sent = false;
+                        pthread_mutex_lock(&clients_mutex);
+                        for (int i = 0; i < MAX_CLIENTS; i++) {
+                            if (clients[i] && strcmp(clients[i]->name, req->send_message->recipient) == 0) {
+                                send(clients[i]->sockfd, dm_msg, strlen(dm_msg), 0);
+                                sent = true;
+                                break;
+                            }
+                        }
+                        pthread_mutex_unlock(&clients_mutex);
+                        if (!sent) {
+                            char error_msg[256];
+                            snprintf(error_msg, sizeof(error_msg), "User %s not found.\n", req->send_message->recipient);
+                            send(cli->sockfd, error_msg, strlen(error_msg), 0);
+                        }
+                    } else {
+                        // Broadcast message
+                        char broadcast_msg[1024];
+                        snprintf(broadcast_msg, sizeof(broadcast_msg), "\n> Broadcast Message from %s: %s\n", cli->name, req->send_message->content);
+                        broadcast_message(cli->name, broadcast_msg);
+                    }
                 }
                 break;
+
         }
 
         chat__request__free_unpacked(req, NULL);
