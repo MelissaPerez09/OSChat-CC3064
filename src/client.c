@@ -12,6 +12,9 @@
 #include <arpa/inet.h>
 #include "chat.pb-c.h"
 #include <pthread.h>
+#include <sys/select.h>
+#include <errno.h>
+
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
@@ -143,21 +146,39 @@ void clear_buffer(uint8_t *buffer, size_t size) {
 // Añade la declaración de la nueva función aquí
 int handle_recv_errors(int len);
 
-void *receive_messages(void *sockfd) {
-    int server_sockfd = *(int *)sockfd;
+void *receive_messages(void *sockfd_ptr) {
+    int sockfd = *(int *)sockfd_ptr;
+    fd_set readfds;
+    struct timeval timeout;
     char buffer[1024];
 
     while (1) {
-        clear_buffer(buffer, sizeof(buffer));
-        int len = recv(server_sockfd, buffer, sizeof(buffer), 0);
-        if (len > 0) {
-            printf("%s", buffer);
-        } else if (len == 0) {
-            printf("Server closed the connection.\n");
+        FD_ZERO(&readfds);
+        FD_SET(sockfd, &readfds);
+
+        // Configura un timeout de 0.5 segundos
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 500000;
+
+        int activity = select(sockfd + 1, &readfds, NULL, NULL, &timeout);
+
+        if (activity < 0 && errno != EINTR) {
+            printf("Select error.\n");
             break;
-        } else {
-            perror("recv failed");
-            break;
+        }
+
+        if (FD_ISSET(sockfd, &readfds)) {
+            clear_buffer(buffer, sizeof(buffer));
+            int len = recv(sockfd, buffer, sizeof(buffer), 0);
+            if (len > 0) {
+                printf("%s", buffer);
+            } else if (len == 0) {
+                printf("Server closed the connection.\n");
+                break;
+            } else {
+                perror("recv failed");
+                break;
+            }
         }
     }
     return NULL;
@@ -284,9 +305,12 @@ int main(int argc, char *argv[]) {
     printf("\nRegistered as %s. Welcome to the chat!\n", username);
 
     pthread_t recv_thread;
-    if(pthread_create(&recv_thread, NULL, receive_messages, (void *)&sockfd) != 0) {
+    if(pthread_create(&recv_thread, NULL, receive_messages, (void *)&sockfd) == 0) {
+        pthread_detach(recv_thread);
+    } else {
         fprintf(stderr, "Failed to create thread for receiving messages.\n");
     }
+
 
     while (1) {
         menu();
