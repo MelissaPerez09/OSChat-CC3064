@@ -30,6 +30,11 @@ void menu() {
     printf("----------------------------------\nSelect an option: ");
 }
 
+/*
+Funcion que imprime el nombre de usuario y la dirección IP de un usuario.
+Parametros:
+    * char* full_username: nombre de usuario y dirección IP
+*/
 void print_user_info(char* full_username) {
     char* token = strtok(full_username, "@");
     if (token != NULL) {
@@ -41,6 +46,12 @@ void print_user_info(char* full_username) {
     }
 }
 
+/*
+Funcion que envía un mensaje de broadcast al servidor.
+Parametros:
+    * int sockfd: socket descriptor
+    * const char *message: mensaje a enviar
+*/
 void send_broadcast_message(int sockfd, const char *message) {
     Chat__Request request = CHAT__REQUEST__INIT;
     request.operation = CHAT__OPERATION__SEND_MESSAGE;
@@ -57,7 +68,6 @@ void send_broadcast_message(int sockfd, const char *message) {
     send(sockfd, buffer, len, 0);
     free(buffer);
 }
-
 
 void register_user(int sockfd, const char *username) {
     Chat__Request request = CHAT__REQUEST__INIT;
@@ -76,6 +86,13 @@ void register_user(int sockfd, const char *username) {
     //printf("Registration request sent for username '%s'.\n", username);
 }
 
+/*
+Funcion que envìa una solicitud para obtener la lista de los usuarios conectados, la procesa e imprime la respuesta del servidor.
+Parametros:
+    * int sockfd: socket descriptor para comunicarse con el servidor
+Retornos:
+    * int: codigo de estado; 0 para exito y -1 para fallas
+*/
 int request_user_list(int sockfd) {
     Chat__Request request = CHAT__REQUEST__INIT;
     request.operation = CHAT__OPERATION__GET_USERS;
@@ -122,7 +139,13 @@ int request_user_list(int sockfd) {
     return 0;  // No hubo errores, pero tampoco se recibió una lista de usuarios
 }
 
-
+/*
+Funcion que envia una solicitud al servidor para actualizar el estado del usuario.
+Parametros: 
+    * int sockfd: socket descriptor
+    * const char *username: usuario al que se le actualiza el estado
+    * Chat__UserStatus new_status: nuevo estatu a aplicar
+*/
 void update_status(int sockfd, const char *username, Chat__UserStatus new_status) {
     Chat__Request request = CHAT__REQUEST__INIT;
     request.operation = CHAT__OPERATION__UPDATE_STATUS;
@@ -139,13 +162,41 @@ void update_status(int sockfd, const char *username, Chat__UserStatus new_status
     free(buffer);
 }
 
+/*
+Funcion que limpia un buffer de bytes.
+Parametros:
+    * uint8_t *buffer: buffer a limpiar
+    * size_t size: tamaño del buffer
+*/
 void clear_buffer(uint8_t *buffer, size_t size) {
     memset(buffer, 0, size);
 }
 
-// Añade la declaración de la nueva función aquí
-int handle_recv_errors(int len);
+/*
+Funcion que maneja errores en la recepción de mensajes.
+Parametros:
+    * int len: longitud del mensaje recibido
+Retornos:
+    * int: codigo de estado; 0 para no errores y -1 para sí el server cerro la conexión o hubo un error
+*/
+int handle_recv_errors(int len) {
+    if (len == 0) {
+        printf("Server closed the connection.\n");
+        return -1;
+    } else if (len < 0) {
+        perror("recv failed");
+        return -1;
+    }
+    return 0;
+}
 
+/*
+Funcion que recibe mensajes del servidor y los imprime en la consola.
+Parametros:
+    * void *sockfd_ptr: puntero al descriptor del socket
+Retornos:
+    * void: puntero nulo
+*/
 void *receive_messages(void *sockfd_ptr) {
     int sockfd = *(int *)sockfd_ptr;
     fd_set readfds;
@@ -184,6 +235,13 @@ void *receive_messages(void *sockfd_ptr) {
     return NULL;
 }
 
+/*
+Funcion que envía un mensaje directo a un usuario específico.
+Parametros:
+    * int sockfd: socket descriptor
+    * const char *recipient: destinatario del mensaje
+    * const char *message: mensaje a enviar
+*/
 void send_direct_message(int sockfd, const char *recipient, const char *message) {
     Chat__Request request = CHAT__REQUEST__INIT;
     request.operation = CHAT__OPERATION__SEND_MESSAGE;
@@ -201,7 +259,13 @@ void send_direct_message(int sockfd, const char *recipient, const char *message)
     free(buffer);
 }
 
-
+/*
+Funcion que maneja la respuesta del servidor a una solicitud de información del usuario, imprimiendo detalles o un mensaje de error.
+Parametros:
+    * int sockfd: socket descriptor
+Retornos:
+    * int: codigo de estado; 0 usuario encontrado y -1 para lo contrario
+*/
 int receive_user_info_response(int sockfd) {
     uint8_t buffer[BUFFER_SIZE];
     clear_buffer(buffer, BUFFER_SIZE);
@@ -226,18 +290,6 @@ int receive_user_info_response(int sockfd) {
         }
     }
     return handle_recv_errors(len);
-}
-
-// Aquí está la definición de handle_recv_errors
-int handle_recv_errors(int len) {
-    if (len == 0) {
-        printf("Server closed the connection.\n");
-        return -1;
-    } else if (len < 0) {
-        perror("recv failed");
-        return -1;
-    }
-    return 0;
 }
 
 int receive_server_response(int sockfd) {
@@ -368,6 +420,7 @@ int main(int argc, char *argv[]) {
                 break;
             case 5:
             {
+                // Obtener información de un usuario específico
                 char username[32];
                 printf("Enter the username to get information: ");
                 fgets(username, sizeof(username), stdin);

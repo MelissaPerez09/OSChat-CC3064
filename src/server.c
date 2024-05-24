@@ -97,7 +97,14 @@ void remove_client(int uid) {
     pthread_mutex_unlock(&clients_mutex);
 }
 
-
+/*
+Función para enviar la lista de usuarios conectados a un cliente específico.
+Si se proporciona un nombre de usuario, se envía solo la información de ese usuario.
+De lo contrario, se envía la lista completa de usuarios.
+Parametros:
+    * int sockfd: socket descriptor
+    * Chat__UserListRequest *request: detalles de la solicitud, puede incluir un username específico
+*/
 void send_user_list(int sockfd, Chat__UserListRequest *request) {
     pthread_mutex_lock(&clients_mutex);
     size_t num_users = 0;
