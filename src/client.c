@@ -104,8 +104,16 @@ void update_status(int sockfd, const char *username, Chat__UserStatus new_status
     free(buffer);
 }
 
+void clear_buffer(uint8_t *buffer, size_t size) {
+    memset(buffer, 0, size);
+}
+
+// Añade la declaración de la nueva función aquí
+int handle_recv_errors(int len);
+
 int receive_user_info_response(int sockfd) {
     uint8_t buffer[BUFFER_SIZE];
+    clear_buffer(buffer, BUFFER_SIZE);
     int len = recv(sockfd, buffer, BUFFER_SIZE, 0);
     if (len > 0) {
         Chat__Response *response = chat__response__unpack(NULL, len, buffer);
@@ -124,13 +132,20 @@ int receive_user_info_response(int sockfd) {
             chat__response__free_unpacked(response, NULL);
             return -1;
         }
-    } else if (len == 0) {
+    }
+    return handle_recv_errors(len);
+}
+
+// Aquí está la definición de handle_recv_errors
+int handle_recv_errors(int len) {
+    if (len == 0) {
         printf("Server closed the connection.\n");
         return -1;
-    } else {
+    } else if (len < 0) {
         perror("recv failed");
         return -1;
     }
+    return 0;
 }
 
 int receive_server_response(int sockfd) {
@@ -229,6 +244,8 @@ int main(int argc, char *argv[]) {
                 break;
             case 4:
                 // Solicitar la lista de usuarios conectados
+                Chat__UserListRequest user_list_request = CHAT__USER_LIST_REQUEST__INIT;
+                user_list_request.username = NULL;  // Solicitar todos los usuarios
                 request_user_list(sockfd);
                 break;
             case 5:

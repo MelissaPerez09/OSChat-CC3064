@@ -98,30 +98,46 @@ void remove_client(int uid) {
 }
 
 
-void send_user_list(int sockfd) {
+void send_user_list(int sockfd, Chat__UserListRequest *request) {
     pthread_mutex_lock(&clients_mutex);
     size_t num_users = 0;
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i]) num_users++;
-    }
+    Chat__User **users = NULL;
 
-    Chat__User **users = malloc(num_users * sizeof(Chat__User *));
-    size_t j = 0;
-    for (int i = 0; i < MAX_CLIENTS && j < num_users; i++) {
-        if (clients[i]) {
-            users[j] = malloc(sizeof(Chat__User));
-            chat__user__init(users[j]);
-            users[j]->username = strdup(clients[i]->name);
-            users[j]->status = clients[i]->status;
-            j++;
+    // Determinar si se solicita un usuario específico o todos los usuarios
+    if (request != NULL && request->username != NULL && strlen(request->username) > 0) {
+        // Buscar solo el usuario específico
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (clients[i] && strcmp(clients[i]->name, request->username) == 0) {
+                users = malloc(sizeof(Chat__User*));
+                users[0] = malloc(sizeof(Chat__User));
+                chat__user__init(users[0]);
+                users[0]->username = strdup(clients[i]->name);
+                users[0]->status = clients[i]->status;
+                num_users = 1;
+                break;
+            }
+        }
+    } else {
+        // Enviar la lista completa de usuarios
+        users = malloc(MAX_CLIENTS * sizeof(Chat__User*));
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (clients[i]) {
+                users[num_users] = malloc(sizeof(Chat__User));
+                chat__user__init(users[num_users]);
+                users[num_users]->username = strdup(clients[i]->name);
+                users[num_users]->status = clients[i]->status;
+                num_users++;
+            }
         }
     }
+
     pthread_mutex_unlock(&clients_mutex);
 
+    // Empaquetar y enviar la respuesta
     Chat__UserListResponse user_list_response = CHAT__USER_LIST_RESPONSE__INIT;
     user_list_response.n_users = num_users;
     user_list_response.users = users;
-    user_list_response.type = CHAT__USER_LIST_TYPE__ALL;
+    user_list_response.type = request ? CHAT__USER_LIST_TYPE__SINGLE : CHAT__USER_LIST_TYPE__ALL;
 
     Chat__Response response = CHAT__RESPONSE__INIT;
     response.operation = CHAT__OPERATION__GET_USERS;
@@ -135,12 +151,14 @@ void send_user_list(int sockfd) {
     send(sockfd, buffer, len, 0);
     free(buffer);
 
+    // Liberar recursos
     for (int i = 0; i < num_users; i++) {
         free(users[i]->username);
         free(users[i]);
     }
     free(users);
 }
+
 
 
 void* check_inactivity(void* arg) {
@@ -179,9 +197,14 @@ void *handle_client(void *arg) {
         }
 
         switch (req->operation) {
-            // Enviar la lista de usuarios conectados
             case CHAT__OPERATION__GET_USERS:
-                send_user_list(cli->sockfd);
+                if (req->payload_case == CHAT__REQUEST__PAYLOAD_GET_USERS) {
+                    // Se envía la solicitud completa que incluye la posibilidad de un nombre de usuario específico
+                    send_user_list(cli->sockfd, req->get_users);
+                } else {
+                    // En caso de que no haya detalles (lo cual es poco probable dado cómo está configurada tu aplicación), se envía NULL
+                    send_user_list(cli->sockfd, NULL);
+                }
                 break;
             
             // Cambiar el estado de un usuario
