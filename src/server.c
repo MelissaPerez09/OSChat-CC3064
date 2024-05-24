@@ -20,7 +20,7 @@
 
 #define PORT 8080
 #define MAX_CLIENTS 100
-#define INACTIVITY_TIMEOUT 5
+#define INACTIVITY_TIMEOUT 300
 
 typedef enum {
     ACTIVO = 0,   // En línea y disponible para recibir mensajes
@@ -103,28 +103,29 @@ void send_user_list(int sockfd, Chat__UserListRequest *request) {
     size_t num_users = 0;
     Chat__User **users = NULL;
 
-    // Determinar si se solicita un usuario específico o todos los usuarios
     if (request != NULL && request->username != NULL && strlen(request->username) > 0) {
-        // Buscar solo el usuario específico
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if (clients[i] && strcmp(clients[i]->name, request->username) == 0) {
                 users = malloc(sizeof(Chat__User*));
                 users[0] = malloc(sizeof(Chat__User));
                 chat__user__init(users[0]);
-                users[0]->username = strdup(clients[i]->name);
+                char full_name[64]; // Asumiendo que el nombre y la IP caben en este buffer
+                sprintf(full_name, "%s@%s", clients[i]->name, inet_ntoa(clients[i]->address.sin_addr));
+                users[0]->username = strdup(full_name);
                 users[0]->status = clients[i]->status;
                 num_users = 1;
                 break;
             }
         }
     } else {
-        // Enviar la lista completa de usuarios
         users = malloc(MAX_CLIENTS * sizeof(Chat__User*));
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if (clients[i]) {
                 users[num_users] = malloc(sizeof(Chat__User));
                 chat__user__init(users[num_users]);
-                users[num_users]->username = strdup(clients[i]->name);
+                char full_name[64];
+                sprintf(full_name, "%s@%s", clients[i]->name, inet_ntoa(clients[i]->address.sin_addr));
+                users[num_users]->username = strdup(full_name);
                 users[num_users]->status = clients[i]->status;
                 num_users++;
             }

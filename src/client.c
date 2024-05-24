@@ -26,6 +26,17 @@ void menu() {
     printf("----------------------------------\nSelect an option: ");
 }
 
+void print_user_info(char* full_username) {
+    char* token = strtok(full_username, "@");
+    if (token != NULL) {
+        printf("User: %s, ", token);  // Imprime el nombre del usuario
+        token = strtok(NULL, "@");
+        if (token != NULL) {
+            printf("IP: %s, ", token);  // Imprime la dirección IP
+        }
+    }
+}
+
 void register_user(int sockfd, const char *username) {
     Chat__Request request = CHAT__REQUEST__INIT;
     request.operation = CHAT__OPERATION__REGISTER_USER;
@@ -70,7 +81,9 @@ int request_user_list(int sockfd) {
                 Chat__UserListResponse *user_list = response->user_list;
                 printf("\nConnected Users:\n");
                 for (size_t i = 0; i < user_list->n_users; i++) {
-                    printf("User: %s, Status: %d\n", user_list->users[i]->username, user_list->users[i]->status);
+                    //printf("User: %s, Status: %d\n", user_list->users[i]->username, user_list->users[i]->status);
+                    print_user_info(user_list->users[i]->username);
+                    printf("Status: %d\n", user_list->users[i]->status);  // Imprime el estado del usuario
                 }
                 chat__response__free_unpacked(response, NULL);
                 return 0;  // Success
@@ -111,6 +124,8 @@ void clear_buffer(uint8_t *buffer, size_t size) {
 // Añade la declaración de la nueva función aquí
 int handle_recv_errors(int len);
 
+
+
 int receive_user_info_response(int sockfd) {
     uint8_t buffer[BUFFER_SIZE];
     clear_buffer(buffer, BUFFER_SIZE);
@@ -120,7 +135,8 @@ int receive_user_info_response(int sockfd) {
         if (response && response->status_code == CHAT__STATUS_CODE__OK && response->result_case == CHAT__RESPONSE__RESULT_USER_LIST) {
             Chat__UserListResponse *user_list = response->user_list;
             if (user_list->n_users > 0) {
-                printf("User: %s, Status: %d\n", user_list->users[0]->username, user_list->users[0]->status);
+                print_user_info(user_list->users[0]->username);
+                printf("Status: %d\n", user_list->users[0]->status);
             } else {
                 printf("No user found.\n");
                 return -1;
@@ -165,10 +181,11 @@ int receive_server_response(int sockfd) {
                 Chat__UserListResponse *user_list = response->user_list;
                 printf("\nConnected Users:\n");
                 for (size_t i = 0; i < user_list->n_users; i++) {
-                    printf("User: %s, Status: %d\n", user_list->users[i]->username, user_list->users[i]->status);
+                    print_user_info(user_list->users[i]->username);
+                    printf("Status: %d\n", user_list->users[i]->status);  // Imprime el estado del usuario
                 }
                 chat__response__free_unpacked(response, NULL);
-                return 0;  // Return 0 to indicate success
+                return 0;  // Éxito
             }
 
             chat__response__free_unpacked(response, NULL);
