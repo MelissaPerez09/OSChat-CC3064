@@ -18,7 +18,6 @@
 #include <time.h>
 #include "chat.pb-c.h"
 
-#define PORT 8080
 #define MAX_CLIENTS 100
 #define INACTIVITY_TIMEOUT 300
 
@@ -287,21 +286,32 @@ void *handle_client(void *arg) {
     return NULL;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Uso: %s <port>\n", argv[0]);
+        return 1;
+    }
+
+    int port = atoi(argv[1]);
     int listenfd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in serv_addr = {0};
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons(PORT);
+    serv_addr.sin_port = htons(port);
 
     int opt = 1;
     // Configuración para reutilizar la dirección IP y puerto
     setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-    listen(listenfd, 10);
 
-    printf("Server started on port %d\n", PORT);
+    // Agregamos la llamada a listen()
+    if (listen(listenfd, 10) < 0) {
+        perror("Server: can't listen on port");
+        exit(1);
+    }
+
+    printf("Server started on port %d\n", port); 
     pthread_t tid_inactivity;
     pthread_create(&tid_inactivity, NULL, &check_inactivity, NULL); 
 

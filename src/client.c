@@ -15,8 +15,8 @@
 #include <sys/select.h>
 #include <errno.h>
 
-#define PORT 8080
 #define BUFFER_SIZE 1024
+const char* status_names[] = {"ACTIVE", "BUSY", "OFFLINE"};
 
 // Variable global para controlar el thread de recepción
 volatile int keep_receiving = 1;
@@ -132,7 +132,7 @@ int request_user_list(int sockfd) {
                 for (size_t i = 0; i < user_list->n_users; i++) {
                     //printf("User: %s, Status: %d\n", user_list->users[i]->username, user_list->users[i]->status);
                     print_user_info(user_list->users[i]->username);
-                    printf("Status: %d\n", user_list->users[i]->status);  // Imprime el estado del usuario
+                    printf("Status: %s\n", status_names[user_list->users[i]->status]);   // Imprime el estado del usuario
                 }
                 chat__response__free_unpacked(response, NULL);
                 return 0;  // Success
@@ -223,7 +223,7 @@ void *receive_messages(void *sockfd_ptr) {
         int result = select(sockfd + 1, &readfds, NULL, NULL, &tv);
 
         if (result > 0 && FD_ISSET(sockfd, &readfds)) {
-            clear_buffer(buffer, sizeof(buffer));
+            clear_buffer((uint8_t *)buffer, sizeof(buffer));
             int len = recv(sockfd, buffer, sizeof(buffer), 0);
             if (len > 0) {
                 printf("%s", buffer); // Imprime el mensaje recibido
@@ -282,7 +282,10 @@ int receive_user_info_response(int sockfd) {
             Chat__UserListResponse *user_list = response->user_list;
             if (user_list->n_users > 0) {
                 print_user_info(user_list->users[0]->username);
-                printf("Status: %d\n", user_list->users[0]->status);
+                //printf("Status: %d\n", user_list->users[0]->status);
+                for (size_t i = 0; i < user_list->n_users; i++) {
+                    printf("Status: %s\n", status_names[user_list->users[i]->status]);
+                }
             } else {
                 printf("No user found.\n");
                 return -1;
@@ -316,7 +319,7 @@ int receive_server_response(int sockfd) {
                 printf("\nConnected Users:\n");
                 for (size_t i = 0; i < user_list->n_users; i++) {
                     print_user_info(user_list->users[i]->username);
-                    printf("Status: %d\n", user_list->users[i]->status);  // Imprime el estado del usuario
+                    printf("Status: %s\n", status_names[user_list->users[i]->status]);  // Imprime el estado del usuario como texto
                 }
                 chat__response__free_unpacked(response, NULL);
                 return 0;  // Éxito
@@ -385,18 +388,19 @@ void enter_chatroom(int sockfd) {
 
 
 int main(int argc, char *argv[]) {
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <server_ip> <username>\n", argv[0]);
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s <username> <server_ip> <server_port>\n", argv[0]);
         exit(1);
     }
 
-    const char *server_ip = argv[1];
-    const char *username = argv[2];
+    const char *username = argv[1];
+    const char *server_ip = argv[2];
+    int port = atoi(argv[3]);
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in serv_addr = {0};
 
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(PORT);
+    serv_addr.sin_port = htons(port);
     inet_pton(AF_INET, server_ip, &serv_addr.sin_addr);
 
     if (connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
@@ -450,39 +454,56 @@ int main(int argc, char *argv[]) {
                 break;
             case 3:
                 // Solicitar la lista de usuarios conectados
-                Chat__UserListRequest user_list_request = CHAT__USER_LIST_REQUEST__INIT;
-                user_list_request.username = NULL;  // Solicitar todos los usuarios
-                request_user_list(sockfd);
+                {
+                    Chat__UserListRequest user_list_request = CHAT__USER_LIST_REQUEST__INIT; // Correcto uso de la inicialización
+                    user_list_request.username = NULL;  // Solicitar todos los usuarios
+
+                    Chat__Request request = CHAT__REQUEST__INIT;
+                    request.operation = CHAT__OPERATION__GET_USERS;
+                    request.get_users = &user_list_request;
+                    request.payload_case = CHAT__REQUEST__PAYLOAD_GET_USERS;
+
+                    size_t len = chat__request__get_packed_size(&request);
+                    uint8_t *buffer = malloc(len);
+                    chat__request__pack(&request, buffer);
+
+                    send(sockfd, buffer, len, 0);
+                    free(buffer);
+
+                    if (receive_server_response(sockfd) != 0) {
+                        printf("Failed to fetch user list.\n");
+                    }
+                }
                 break;
             case 4:
-            {
-                // Obtener información de un usuario específico
-                char username[32];
-                printf("Enter the username to get information: ");
-                fgets(username, sizeof(username), stdin);
-                username[strcspn(username, "\n")] = 0; // Remove newline character
+                {
+                    // Obtener información de un usuario específico
+                    char username[32];
+                    printf("Enter the username to get information: ");
+                    fgets(username, sizeof(username), stdin);
+                    username[strcspn(username, "\n")] = 0; // Remove newline character
 
-                Chat__UserListRequest user_info_request = CHAT__USER_LIST_REQUEST__INIT;
-                user_info_request.username = username; // Specify the user
+                    Chat__UserListRequest user_info_request = CHAT__USER_LIST_REQUEST__INIT;
+                    user_info_request.username = username; // Specify the user
 
-                Chat__Request request = CHAT__REQUEST__INIT;
-                request.operation = CHAT__OPERATION__GET_USERS;
-                request.payload_case = CHAT__REQUEST__PAYLOAD_GET_USERS;
-                request.get_users = &user_info_request;
+                    Chat__Request request = CHAT__REQUEST__INIT;
+                    request.operation = CHAT__OPERATION__GET_USERS;
+                    request.payload_case = CHAT__REQUEST__PAYLOAD_GET_USERS;
+                    request.get_users = &user_info_request;
 
-                size_t len = chat__request__get_packed_size(&request);
-                uint8_t *buffer = malloc(len);
-                chat__request__pack(&request, buffer);
+                    size_t len = chat__request__get_packed_size(&request);
+                    uint8_t *buffer = malloc(len);
+                    chat__request__pack(&request, buffer);
 
-                send(sockfd, buffer, len, 0);
-                free(buffer);
+                    send(sockfd, buffer, len, 0);
+                    free(buffer);
 
-                // Call the function to receive and process the response from the server
-                if (receive_user_info_response(sockfd) != 0) {
-                    printf("No user found with the username '%s'.\n", username);
+                    // Call the function to receive and process the response from the server
+                    if (receive_user_info_response(sockfd) != 0) {
+                        printf("No user found with the username '%s'.\n", username);
+                    }
                 }
-            }
-            break;
+                break;
             case 5:
                 // Display help
                 printf("\nHELP!: \n1 - Broadcast message to all\n2 - Send a direct message to a user\n3 - Change your status\n4 - View all connected users in the server\n5 - Get information about a specific user\n6 - Display this help\n7 - Exit the chat\n");
