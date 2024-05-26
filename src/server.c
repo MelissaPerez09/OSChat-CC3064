@@ -50,6 +50,7 @@ client_t *clients[MAX_CLIENTS];
 int uid = 10;
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+
 bool username_exists(const char* username) {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < MAX_CLIENTS; ++i) {
@@ -170,7 +171,8 @@ void send_user_list(int sockfd, Chat__UserListRequest *request) {
 void broadcast_message(char *sender_name, char *message) {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i] && strcmp(clients[i]->name, sender_name) != 0) { // No reenviar al emisor
+        if (clients[i] && strcmp(clients[i]->name, sender_name) != 0) {
+            printf("Sending to %s: %s\n", clients[i]->name, message);  // Debug print
             send(clients[i]->sockfd, message, strlen(message), 0);
         }
     }

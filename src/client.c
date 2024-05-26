@@ -20,14 +20,21 @@
 #define BUFFER_SIZE 1024
 
 void menu() {
-    printf("\n----------------------------------\n1. Chat with everyone (broadcast)\n");
-    printf("2. Send a direct message\n");
-    printf("3. Change Status\n");
-    printf("4. View connected users\n");
-    printf("5. See user information\n");
-    printf("6. Help\n");
-    printf("7. Exit\n");
+    printf("\n----------------------------------\n1. Enter the chatroom\n");
+    printf("2. Change Status\n");
+    printf("3. View connected users\n");
+    printf("4. See user information\n");
+    printf("5. Help\n");
+    printf("6. Exit\n");
     printf("----------------------------------\nSelect an option: ");
+}
+
+void chatroom_menu() {
+    printf("\n------ Chatroom Menu ------\n");
+    printf("1. Chat with everyone (broadcast)\n");
+    printf("2. Send a direct message\n");
+    printf("3. Exit the chatroom\n");
+    printf("----------------------------------\n");
 }
 
 /*
@@ -199,30 +206,28 @@ Retornos:
 */
 void *receive_messages(void *sockfd_ptr) {
     int sockfd = *(int *)sockfd_ptr;
-    fd_set readfds;
-    struct timeval timeout;
     char buffer[1024];
+    fd_set readfds;
 
     while (1) {
         FD_ZERO(&readfds);
         FD_SET(sockfd, &readfds);
 
-        // Configura un timeout de 0.5 segundos
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 500000;
+        struct timeval tv = {1, 0};  // 1 second timeout
+        int result = select(sockfd + 1, &readfds, NULL, NULL, &tv);
 
-        int activity = select(sockfd + 1, &readfds, NULL, NULL, &timeout);
-
-        if (activity < 0 && errno != EINTR) {
-            printf("Select error.\n");
+        if (result == -1) {
+            perror("Select error");
             break;
+        } else if (result == 0) {
+            continue;  // Timeout occurred, loop again
         }
 
         if (FD_ISSET(sockfd, &readfds)) {
-            clear_buffer(buffer, sizeof(buffer));
-            int len = recv(sockfd, buffer, sizeof(buffer), 0);
+            int len = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
             if (len > 0) {
-                printf("%s", buffer);
+                buffer[len] = '\0';  // Ensure null termination
+                printf("%s", buffer);  // Print the received message
             } else if (len == 0) {
                 printf("Server closed the connection.\n");
                 break;
@@ -328,6 +333,46 @@ int receive_server_response(int sockfd) {
     }
 }
 
+void enter_chatroom(int sockfd) {
+    int option;
+    while (1) {
+        chatroom_menu();
+        printf("Select an option: ");
+        scanf("%d", &option);
+        getchar();  // Clear the newline character
+
+        switch (option) {
+            case 1: {
+                printf("Enter your message: ");
+                char message[256];
+                fgets(message, sizeof(message), stdin);
+                message[strcspn(message, "\n")] = 0; // Remove newline character
+                send_broadcast_message(sockfd, message);
+                break;
+            }
+            case 2: {
+                char recipient[32];
+                printf("Enter the username to send message: ");
+                fgets(recipient, sizeof(recipient), stdin);
+                recipient[strcspn(recipient, "\n")] = 0;  // Remove newline character
+
+                printf("Enter your message: ");
+                char message[256];
+                fgets(message, sizeof(message), stdin);
+                message[strcspn(message, "\n")] = 0;  // Remove newline character
+
+                send_direct_message(sockfd, recipient, message);
+                break;
+            }
+            case 3:
+                return;  // Exit the chatroom
+            default:
+                printf("Invalid option. Please try again.\n");
+                break;
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 3) {
         fprintf(stderr, "Usage: %s <server_ip> <username>\n", argv[0]);
@@ -356,13 +401,13 @@ int main(int argc, char *argv[]) {
 
     printf("\nRegistered as %s. Welcome to the chat!\n", username);
 
+    // Creación del thread para recibir mensajes
     pthread_t recv_thread;
-    if(pthread_create(&recv_thread, NULL, receive_messages, (void *)&sockfd) == 0) {
-        pthread_detach(recv_thread);
-    } else {
+    if (pthread_create(&recv_thread, NULL, receive_messages, (void *)&sockfd) != 0) {
         fprintf(stderr, "Failed to create thread for receiving messages.\n");
+    } else {
+        pthread_detach(recv_thread);
     }
-
 
     while (1) {
         menu();
@@ -372,30 +417,10 @@ int main(int argc, char *argv[]) {
         getchar();
 
         switch (option) {
-            case 1: {
-                printf("Enter your message: ");
-                char message[256];
-                fgets(message, sizeof(message), stdin);
-                message[strcspn(message, "\n")] = 0; // Eliminar el carácter de nueva línea
-                send_broadcast_message(sockfd, message);
+            case 1:
+                enter_chatroom(sockfd);
                 break;
-            }
-            case 2: {
-                char recipient[32];
-                printf("Enter the username to send message: ");
-                fgets(recipient, sizeof(recipient), stdin);
-                recipient[strcspn(recipient, "\n")] = 0;  // Remove newline character
-
-                printf("Enter your message: ");
-                char message[256];
-                fgets(message, sizeof(message), stdin);
-                message[strcspn(message, "\n")] = 0;  // Remove newline character
-
-                send_direct_message(sockfd, recipient, message);
-                break;
-            }
-
-            case 3:
+            case 2:
                 // Change status
                 printf("Choose new status (0: ONLINE, 1: BUSY, 2: OFFLINE): ");
                 int new_status;
@@ -412,13 +437,13 @@ int main(int argc, char *argv[]) {
                     printf("Invalid status. Please try again.\n");
                 }
                 break;
-            case 4:
+            case 3:
                 // Solicitar la lista de usuarios conectados
                 Chat__UserListRequest user_list_request = CHAT__USER_LIST_REQUEST__INIT;
                 user_list_request.username = NULL;  // Solicitar todos los usuarios
                 request_user_list(sockfd);
                 break;
-            case 5:
+            case 4:
             {
                 // Obtener información de un usuario específico
                 char username[32];
@@ -447,11 +472,11 @@ int main(int argc, char *argv[]) {
                 }
             }
             break;
-            case 6:
+            case 5:
                 // Display help
                 printf("\nHELP!: \n1 - Broadcast message to all\n2 - Send a direct message to a user\n3 - Change your status\n4 - View all connected users in the server\n5 - Get information about a specific user\n6 - Display this help\n7 - Exit the chat\n");
                 break;
-            case 7:
+            case 6:
                 // Exit the chat
                 close(sockfd);
                 printf("\nDisconnected from server.\n");
@@ -462,5 +487,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    close(sockfd);
     return 0;
 }
