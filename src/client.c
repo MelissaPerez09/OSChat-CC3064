@@ -15,9 +15,12 @@
 #include <sys/select.h>
 #include <errno.h>
 
-
 #define PORT 8080
 #define BUFFER_SIZE 1024
+
+// Variable global para controlar el thread de recepción
+volatile int keep_receiving = 1;
+
 
 void menu() {
     printf("\n----------------------------------\n1. Enter the chatroom\n");
@@ -206,39 +209,37 @@ Retornos:
 */
 void *receive_messages(void *sockfd_ptr) {
     int sockfd = *(int *)sockfd_ptr;
-    char buffer[1024];
     fd_set readfds;
+    char buffer[1024];
 
-    while (1) {
+    while (keep_receiving) {
         FD_ZERO(&readfds);
         FD_SET(sockfd, &readfds);
 
-        struct timeval tv = {1, 0};  // 1 second timeout
+        struct timeval tv;
+        tv.tv_sec = 0;  // Espera activa corta para mantener la reactividad
+        tv.tv_usec = 500000; // 500 milisegundos
+
         int result = select(sockfd + 1, &readfds, NULL, NULL, &tv);
 
-        if (result == -1) {
-            perror("Select error");
-            break;
-        } else if (result == 0) {
-            continue;  // Timeout occurred, loop again
-        }
-
-        if (FD_ISSET(sockfd, &readfds)) {
-            int len = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+        if (result > 0 && FD_ISSET(sockfd, &readfds)) {
+            clear_buffer(buffer, sizeof(buffer));
+            int len = recv(sockfd, buffer, sizeof(buffer), 0);
             if (len > 0) {
-                buffer[len] = '\0';  // Ensure null termination
-                printf("%s", buffer);  // Print the received message
+                printf("%s", buffer); // Imprime el mensaje recibido
             } else if (len == 0) {
                 printf("Server closed the connection.\n");
                 break;
-            } else {
+            } else if (len < 0) {
                 perror("recv failed");
                 break;
             }
         }
     }
+
     return NULL;
 }
+
 
 /*
 Funcion que envía un mensaje directo a un usuario específico.
@@ -334,44 +335,54 @@ int receive_server_response(int sockfd) {
 }
 
 void enter_chatroom(int sockfd) {
+    printf("Entering the chatroom...\n");
+
+    keep_receiving = 1; // Habilita la recepción de mensajes
+
+    pthread_t recv_thread;
+    if (pthread_create(&recv_thread, NULL, receive_messages, (void *)&sockfd) != 0) {
+        fprintf(stderr, "Failed to create thread for receiving messages.\n");
+        return;
+    }
+
     int option;
-    while (1) {
+    do {
         chatroom_menu();
         printf("Select an option: ");
         scanf("%d", &option);
-        getchar();  // Clear the newline character
+        getchar();
 
         switch (option) {
-            case 1: {
+            case 1:
                 printf("Enter your message: ");
                 char message[256];
                 fgets(message, sizeof(message), stdin);
                 message[strcspn(message, "\n")] = 0; // Remove newline character
                 send_broadcast_message(sockfd, message);
                 break;
-            }
-            case 2: {
-                char recipient[32];
+            case 2:
                 printf("Enter the username to send message: ");
+                char recipient[32];
                 fgets(recipient, sizeof(recipient), stdin);
                 recipient[strcspn(recipient, "\n")] = 0;  // Remove newline character
 
                 printf("Enter your message: ");
-                char message[256];
                 fgets(message, sizeof(message), stdin);
                 message[strcspn(message, "\n")] = 0;  // Remove newline character
 
                 send_direct_message(sockfd, recipient, message);
                 break;
-            }
             case 3:
-                return;  // Exit the chatroom
-            default:
-                printf("Invalid option. Please try again.\n");
+                printf("Exiting chatroom...\n");
                 break;
         }
-    }
+    } while (option != 3);
+
+    keep_receiving = 0; // Deshabilita la recepción de mensajes
+    pthread_join(recv_thread, NULL); // Espera a que el thread termine correctamente
 }
+
+
 
 int main(int argc, char *argv[]) {
     if (argc != 3) {
