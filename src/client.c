@@ -20,7 +20,7 @@ const char* status_names[] = {"ACTIVE", "BUSY", "OFFLINE"};
 
 // Variable global para controlar el thread de recepción
 volatile int keep_receiving = 1;
-
+int in_chatroom = 0;
 
 void menu() {
     printf("\n----------------------------------\n1. Enter the chatroom\n");
@@ -48,10 +48,10 @@ Parametros:
 void print_user_info(char* full_username) {
     char* token = strtok(full_username, "@");
     if (token != NULL) {
-        printf("User: %s, ", token);  // Imprime el nombre del usuario
+        printf("User: %s", token);  // Imprime el nombre del usuario
         token = strtok(NULL, "@");
         if (token != NULL) {
-            printf("IP: %s, ", token);  // Imprime la dirección IP
+            printf("\tIP: %s", token);  // Imprime la dirección IP
         }
     }
 }
@@ -132,7 +132,7 @@ int request_user_list(int sockfd) {
                 for (size_t i = 0; i < user_list->n_users; i++) {
                     //printf("User: %s, Status: %d\n", user_list->users[i]->username, user_list->users[i]->status);
                     print_user_info(user_list->users[i]->username);
-                    printf("Status: %s\n", status_names[user_list->users[i]->status]);   // Imprime el estado del usuario
+                    printf("\tStatus: %s\n", status_names[user_list->users[i]->status]);   // Imprime el estado del usuario
                 }
                 chat__response__free_unpacked(response, NULL);
                 return 0;  // Success
@@ -226,7 +226,10 @@ void *receive_messages(void *sockfd_ptr) {
             clear_buffer((uint8_t *)buffer, sizeof(buffer));
             int len = recv(sockfd, buffer, sizeof(buffer), 0);
             if (len > 0) {
-                printf("%s\n", buffer); // Imprime el mensaje recibido
+                // Verificamos si el usuario está en el chatroom antes de imprimir el mensaje
+                if (in_chatroom) {
+                    printf("%s\n", buffer); // Imprime el mensaje recibido
+                }
             } else if (len == 0) {
                 printf("Server closed the connection.\n");
                 break;
@@ -239,7 +242,6 @@ void *receive_messages(void *sockfd_ptr) {
 
     return NULL;
 }
-
 
 /*
 Funcion que envía un mensaje directo a un usuario específico.
@@ -284,7 +286,7 @@ int receive_user_info_response(int sockfd) {
                 print_user_info(user_list->users[0]->username);
                 //printf("Status: %d\n", user_list->users[0]->status);
                 for (size_t i = 0; i < user_list->n_users; i++) {
-                    printf("Status: %s\n", status_names[user_list->users[i]->status]);
+                    printf("\tStatus: %s\n", status_names[user_list->users[i]->status]);
                 }
             } else {
                 printf("No user found.\n");
@@ -319,7 +321,7 @@ int receive_server_response(int sockfd) {
                 printf("\nConnected Users:\n");
                 for (size_t i = 0; i < user_list->n_users; i++) {
                     print_user_info(user_list->users[i]->username);
-                    printf("Status: %s\n", status_names[user_list->users[i]->status]);
+                    printf("\tStatus: %s\n", status_names[user_list->users[i]->status]);
                 }
                 chat__response__free_unpacked(response, NULL);
                 return 0;
@@ -338,9 +340,8 @@ int receive_server_response(int sockfd) {
 }
 
 void enter_chatroom(int sockfd) {
-    printf("Entering the chatroom...\n");
-
     keep_receiving = 1; // Habilita la recepción de mensajes
+    in_chatroom = 1;
 
     pthread_t recv_thread;
     if (pthread_create(&recv_thread, NULL, receive_messages, (void *)&sockfd) != 0) {
@@ -349,6 +350,7 @@ void enter_chatroom(int sockfd) {
     }
 
     int option;
+    char message[256];
     do {
         chatroom_menu();
         printf("Select an option: ");
@@ -357,23 +359,29 @@ void enter_chatroom(int sockfd) {
 
         switch (option) {
             case 1:
-                printf("\nEnter your message: ");
-                char message[256];
-                fgets(message, sizeof(message), stdin);
-                message[strcspn(message, "\n")] = 0;
-                send_broadcast_message(sockfd, message);
+                printf("\n\033[4m\033[95mBROADCAST MESSAGE\033[0m\n");
+                do {
+                    printf("\033[34mMessage: \033[0m");
+                    fgets(message, sizeof(message), stdin);
+                    message[strcspn(message, "\n")] = 0;
+                    if (strcmp(message, "/exit") == 0) break;
+                    send_broadcast_message(sockfd, message);
+                } while (1);
                 break;
             case 2:
-                printf("\nEnter the username to send message: ");
+                printf("\n\033[4m\033[96mDIRECT MESSAGE\033[0m\n");
+                printf("\033[33mUsername to send message:\033[0m ");
                 char recipient[32];
                 fgets(recipient, sizeof(recipient), stdin);
                 recipient[strcspn(recipient, "\n")] = 0;
+                do {
+                    printf("\033[34mMessage:\033[0m ");
+                    fgets(message, sizeof(message), stdin);
+                    message[strcspn(message, "\n")] = 0;
+                    if (strcmp(message, "/exit") == 0) break;
 
-                printf("\nEnter your message: ");
-                fgets(message, sizeof(message), stdin);
-                message[strcspn(message, "\n")] = 0;
-
-                send_direct_message(sockfd, recipient, message);
+                    send_direct_message(sockfd, recipient, message);
+                } while (1);
                 break;
             case 3:
                 printf("Exiting chatroom...\n");
@@ -382,10 +390,9 @@ void enter_chatroom(int sockfd) {
     } while (option != 3);
 
     keep_receiving = 0; // Deshabilita la recepción de mensajes
+    in_chatroom = 0;
     pthread_join(recv_thread, NULL); // Espera a que el thread termine correctamente
 }
-
-
 
 int main(int argc, char *argv[]) {
     if (argc != 4) {
@@ -414,7 +421,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("\nRegistered as %s. Welcome to the chat!\n", username);
+    printf("\nRegistered as \033[1m\033[33m%s.\033[1m\033[34m Welcome to the chat!\033[0m\n", username);
 
     // Creación del thread para recibir mensajes
     pthread_t recv_thread;

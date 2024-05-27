@@ -89,7 +89,7 @@ void remove_client(int uid) {
     pthread_mutex_lock(&clients_mutex);
     for (int i = 0; i < MAX_CLIENTS; ++i) {
         if (clients[i] && clients[i]->uid == uid) {
-            printf("\n(*) Client disconnected: %s (IP: %s)\n", clients[i]->name, inet_ntoa(clients[i]->address.sin_addr));
+            printf("\033[91m\n(*) Client disconnected: %s (IP: %s)\n\033[0m", clients[i]->name, inet_ntoa(clients[i]->address.sin_addr));
             clients[i] = NULL;
             break;
         } 
@@ -116,7 +116,7 @@ void send_user_list(int sockfd, Chat__UserListRequest *request) {
                 users = malloc(sizeof(Chat__User*));
                 users[0] = malloc(sizeof(Chat__User));
                 chat__user__init(users[0]);
-                char full_name[64]; // Asumiendo que el nombre y la IP caben en este buffer
+                char full_name[64];
                 sprintf(full_name, "%s@%s", clients[i]->name, inet_ntoa(clients[i]->address.sin_addr));
                 users[0]->username = strdup(full_name);
                 users[0]->status = clients[i]->status;
@@ -173,7 +173,7 @@ void broadcast_message(char *sender_name, char *message_content) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i] && strcmp(clients[i]->name, sender_name) != 0) {
             char formatted_message[1024];
-            snprintf(formatted_message, sizeof(formatted_message), "\n> Broadcast Message from %s: %s", sender_name, message_content);
+            snprintf(formatted_message, sizeof(formatted_message), "\033[1m\033[35m\n\tBROADCAST [%s]:\033[0m %s", sender_name, message_content);
 
             // Crear la estructura del mensaje entrante
             Chat__IncomingMessageResponse msg = CHAT__INCOMING_MESSAGE_RESPONSE__INIT;
@@ -207,7 +207,7 @@ void send_direct_message_to_client(client_t *cli, const char *recipient, const c
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i] && strcmp(clients[i]->name, recipient) == 0 && clients[i]->status != INACTIVO) {
             char formatted_message[1024];
-            snprintf(formatted_message, sizeof(formatted_message), "\n> DM from %s: %s", cli->name, message_content);
+            snprintf(formatted_message, sizeof(formatted_message), "\033[1m\033[36m\n\tDIRECT [%s]:\033[0m %s", cli->name, message_content);
 
             // Crear la estructura del mensaje entrante
             Chat__IncomingMessageResponse msg = CHAT__INCOMING_MESSAGE_RESPONSE__INIT;
@@ -238,9 +238,9 @@ void send_direct_message_to_client(client_t *cli, const char *recipient, const c
     // Confirmar al emisor del mensaje si fue enviado o no
     char feedback_msg[256];
     if (sent) {
-        snprintf(feedback_msg, sizeof(feedback_msg), "Message sent successfully to %s.", recipient);
+        //snprintf(feedback_msg, sizeof(feedback_msg), "\n\n\t\033[32mMessage sent successfully to [%s].\033[0m", recipient);
     } else {
-        snprintf(feedback_msg, sizeof(feedback_msg), "User %s not found or is offline.", recipient);
+        snprintf(feedback_msg, sizeof(feedback_msg), "\n  \033[34mUser [%s] not found or is offline.\033[0m", recipient);
     }
     send(cli->sockfd, feedback_msg, strlen(feedback_msg), 0);
 }
@@ -255,9 +255,9 @@ void* check_inactivity(void* arg) {
             if (clients[i] && difftime(now, clients[i]->last_active) > INACTIVITY_TIMEOUT) {
                 if (clients[i]->status != INACTIVO) {
                     clients[i]->status = INACTIVO;
-                    printf("%s has been set OFFLINE due to inactivity.\n", clients[i]->name);
+                    printf("\033[34m%s has been set OFFLINE due to inactivity.\n\033[0m", clients[i]->name);
                     char message[256];
-                    sprintf(message, "Your status has been changed to OFFLINE due to inactivity.");
+                    sprintf(message, "\033[34mYour status has been changed to OFFLINE due to inactivity.\033[0m");
                     send_response(clients[i]->sockfd, CHAT__STATUS_CODE__OK, message);
                 }
             }
@@ -284,10 +284,11 @@ void *handle_client(void *arg) {
         switch (req->operation) {
             case CHAT__OPERATION__GET_USERS:
                 if (req->payload_case == CHAT__REQUEST__PAYLOAD_GET_USERS) {
-                    // Se envía la solicitud completa que incluye la posibilidad de un nombre de usuario específico
+                    // Se envía la solicitud completa
                     send_user_list(cli->sockfd, req->get_users);
+                    printf("\033[34m\nUser list sent to [%s]\n\033[34m", cli->name);
                 } else {
-                    // En caso de que no haya detalles (lo cual es poco probable dado cómo está configurada tu aplicación), se envía NULL
+                    // En caso de que no haya detalles = NULL
                     send_user_list(cli->sockfd, NULL);
                 }
                 break;
@@ -299,13 +300,13 @@ void *handle_client(void *arg) {
                         if (clients[i] && strcmp(clients[i]->name, req->update_status->username) == 0) {
                             ClientStatus old_status = clients[i]->status; // Guarda el estado antiguo
                             clients[i]->status = req->update_status->new_status; // Actualiza al nuevo estado
-                            send_response(cli->sockfd, CHAT__STATUS_CODE__OK, "\nStatus updated successfully!");
-                            printf("\nUpdated status for %s from %s to %s\n", clients[i]->name, get_status_name(old_status), get_status_name(clients[i]->status));
+                            send_response(cli->sockfd, CHAT__STATUS_CODE__OK, "\n\033[32mStatus updated successfully!\033[0m");
+                            printf("\033[34m\nUpdated status for %s from %s to %s\n\033[34m", clients[i]->name, get_status_name(old_status), get_status_name(clients[i]->status));
                             break;
                         }
                     }
                 } else {
-                    send_response(cli->sockfd, CHAT__STATUS_CODE__BAD_REQUEST, "User not found");
+                    send_response(cli->sockfd, CHAT__STATUS_CODE__BAD_REQUEST, "\033[31mUser not found\033[0m");
                 }
                 break;
             }
@@ -314,9 +315,11 @@ void *handle_client(void *arg) {
                     if (strlen(req->send_message->recipient) > 0) {
                         // Enviar a un usuario específico
                         send_direct_message_to_client(cli, req->send_message->recipient, req->send_message->content);
+                        printf("\033[34m\nDirect Message sent from [%s] to [%s]\n\033[34m", cli->name, req->send_message->recipient);
                     } else {
                         // Broadcast message
                         broadcast_message(cli->name, req->send_message->content);
+                        printf("\033[34m\nBroadcast message sent by [%s]\n\033[34m", cli->name);
                     }
                 }
                 break;
@@ -359,7 +362,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    printf("Server started on port %d\n", port); 
+    printf("\033[32mServer started on port %d\n\033[32m", port); 
     pthread_t tid_inactivity;
     pthread_create(&tid_inactivity, NULL, &check_inactivity, NULL); 
 
@@ -382,13 +385,13 @@ int main(int argc, char *argv[]) {
                 if (!username_exists(req->register_user->username)) {
                     strcpy(cli->name, req->register_user->username);
                     cli->uid = uid++;
-                    printf("\n(*) New connection: %s (IP: %s)\n", cli->name, inet_ntoa(cli->address.sin_addr));
+                    printf("\033[32m\n(*) New connection: %s (IP: %s)\n\033[32m", cli->name, inet_ntoa(cli->address.sin_addr));
                     add_client(cli);
-                    send_response(cli->sockfd, CHAT__STATUS_CODE__OK, "Registration successful");
+                    send_response(cli->sockfd, CHAT__STATUS_CODE__OK, "\033[32mRegistration successful\033[0m");
                     pthread_t tid;
                     pthread_create(&tid, NULL, &handle_client, (void*)cli);
                 } else {
-                    send_response(cli->sockfd, CHAT__STATUS_CODE__BAD_REQUEST, "(!)User is already connected");
+                    send_response(cli->sockfd, CHAT__STATUS_CODE__BAD_REQUEST, "\n\033[31m(!) User is already connected\033[0m");
                     close(cli->sockfd);
                     free(cli);
                 }
