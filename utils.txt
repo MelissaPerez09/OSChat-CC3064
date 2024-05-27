@@ -1,3 +1,8 @@
+LINUX ENVIRONMENT
 * Compile server: gcc server.c chat.pb-c.c -o server -I/opt/homebrew/include -L/opt/homebrew/lib -lprotobuf-c
 * Compile client: gcc client.c chat.pb-c.c -o client -I/opt/homebrew/include -L/opt/homebrew/lib -lprotobuf-c
-* Connect user: ./client 127.0.0.1 <user>
+* Connect user: ./client <user> <IP> <port>
+
+INSTANCE AWS
+* Compile server: gcc -o server server.c chat.pb-c.c -lpthread -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lprotobuf-c
+* Copy files from local to instance: scp -i "pem-client-sever-chat.pem" <file path> ec2-user@ec2<instance IP>.us-east-2.compute.amazonaws.com:/home/ec2-user/
