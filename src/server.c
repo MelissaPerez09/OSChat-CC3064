@@ -172,11 +172,30 @@ void broadcast_message(char *sender_name, char *message) {
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i] && strcmp(clients[i]->name, sender_name) != 0) {
-            char serializedMessage[1024];
-            snprintf(serializedMessage, sizeof(serializedMessage), "sender:%s,message:%s", sender_name, message);
+            // Crea la estructura del mensaje a enviar
+            Chat__IncomingMessageResponse msg = CHAT__INCOMING_MESSAGE_RESPONSE__INIT;
+            msg.sender = sender_name;
+            msg.content = message;
+            msg.type = CHAT__MESSAGE_TYPE__BROADCAST;
 
-            printf("Sending to %s: %s\n", clients[i]->name, serializedMessage);
-            send(clients[i]->sockfd, serializedMessage, strlen(serializedMessage), 0);
+            Chat__Response response = CHAT__RESPONSE__INIT;
+            response.status_code = CHAT__STATUS_CODE__OK;
+            response.result_case = CHAT__RESPONSE__RESULT_INCOMING_MESSAGE;
+            response.operation = CHAT__OPERATION__INCOMING_MESSAGE;
+            response.message = "Message sent successfully!";
+            response.incoming_message = &msg;
+
+            // Serializar el mensaje
+            size_t len = chat__response__get_packed_size(&response);
+            uint8_t *buf = malloc(len);
+            chat__response__pack(&response, buf);
+
+            // Enviar el mensaje serializado
+            printf("Sending to %s: %s\n", clients[i]->name, message);
+            send(clients[i]->sockfd, buf, len, 0);
+
+            // Liberar el buffer
+            free(buf);
         }
     }
 
@@ -253,22 +272,46 @@ void *handle_client(void *arg) {
                         // Enviar a un usuario específico
                         char dm_msg[1024];
                         snprintf(dm_msg, sizeof(dm_msg), "\n> DM from %s: %s\n", cli->name, req->send_message->content);
+
                         bool sent = false;
                         pthread_mutex_lock(&clients_mutex);
                         for (int i = 0; i < MAX_CLIENTS; i++) {
                             if (clients[i] && strcmp(clients[i]->name, req->send_message->recipient) == 0) {
                                 if (clients[i]->status != INACTIVO) {
-                                    send(clients[i]->sockfd, dm_msg, strlen(dm_msg), 0);
+                                    Chat__IncomingMessageResponse msg = CHAT__INCOMING_MESSAGE_RESPONSE__INIT;
+                                    msg.sender = cli->name;
+                                    msg.content = req->send_message->content;
+                                    msg.type = CHAT__MESSAGE_TYPE__DIRECT;
+
+                                    Chat__Response response = CHAT__RESPONSE__INIT;
+                                    response.operation = CHAT__OPERATION__INCOMING_MESSAGE;
+                                    response.status_code = CHAT__STATUS_CODE__OK;
+                                    response.message = "Message sent successfully!";
+                                    response.result_case = CHAT__RESPONSE__RESULT_INCOMING_MESSAGE;
+                                    response.incoming_message = &msg;
+
+                                    // Serializar el mensaje
+                                    size_t len = chat__response__get_packed_size(&response);
+                                    uint8_t *buf = malloc(len);
+                                    chat__response__pack(&response, buf);
+
+                                    // Enviar el mensaje serializado
+                                    send(clients[i]->sockfd, buf, len, 0);
+
+                                    // Liberar el buffer
+                                    free(buf);
+
+                                    sent = true;
+                                    break;
                                 } else {
                                     char error_msg[256];
                                     snprintf(error_msg, sizeof(error_msg), "\n  (!) User %s is OFFLINE.\n", clients[i]->name);
                                     send(cli->sockfd, error_msg, strlen(error_msg), 0);
                                 }
-                                sent = true;
-                                break;
                             }
                         }
                         pthread_mutex_unlock(&clients_mutex);
+
                         if (!sent) {
                             char error_msg[256];
                             snprintf(error_msg, sizeof(error_msg), "User %s not found.\n", req->send_message->recipient);
