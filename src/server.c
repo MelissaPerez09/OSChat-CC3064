@@ -169,12 +169,17 @@ void send_user_list(int sockfd, Chat__UserListRequest *request) {
 
 void broadcast_message(char *sender_name, char *message) {
     pthread_mutex_lock(&clients_mutex);
+
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i] && strcmp(clients[i]->name, sender_name) != 0) {
-            printf("Sending to %s: %s\n", clients[i]->name, message);  // Debug print
-            send(clients[i]->sockfd, message, strlen(message), 0);
+            char serializedMessage[1024];
+            snprintf(serializedMessage, sizeof(serializedMessage), "sender:%s,message:%s", sender_name, message);
+
+            printf("Sending to %s: %s\n", clients[i]->name, serializedMessage);
+            send(clients[i]->sockfd, serializedMessage, strlen(serializedMessage), 0);
         }
     }
+
     pthread_mutex_unlock(&clients_mutex);
 }
 
@@ -252,7 +257,13 @@ void *handle_client(void *arg) {
                         pthread_mutex_lock(&clients_mutex);
                         for (int i = 0; i < MAX_CLIENTS; i++) {
                             if (clients[i] && strcmp(clients[i]->name, req->send_message->recipient) == 0) {
-                                send(clients[i]->sockfd, dm_msg, strlen(dm_msg), 0);
+                                if (clients[i]->status != INACTIVO) {
+                                    send(clients[i]->sockfd, dm_msg, strlen(dm_msg), 0);
+                                } else {
+                                    char error_msg[256];
+                                    snprintf(error_msg, sizeof(error_msg), "\n  (!) User %s is OFFLINE.\n", clients[i]->name);
+                                    send(cli->sockfd, error_msg, strlen(error_msg), 0);
+                                }
                                 sent = true;
                                 break;
                             }

@@ -146,7 +146,7 @@ int request_user_list(int sockfd) {
         perror("recv failed");
         return -1;
     }
-    return 0;  // No hubo errores, pero tampoco se recibió una lista de usuarios
+    return 0;
 }
 
 /*
@@ -226,7 +226,7 @@ void *receive_messages(void *sockfd_ptr) {
             clear_buffer((uint8_t *)buffer, sizeof(buffer));
             int len = recv(sockfd, buffer, sizeof(buffer), 0);
             if (len > 0) {
-                printf("%s", buffer); // Imprime el mensaje recibido
+                printf("%s\n", buffer); // Imprime el mensaje recibido
             } else if (len == 0) {
                 printf("Server closed the connection.\n");
                 break;
@@ -319,10 +319,10 @@ int receive_server_response(int sockfd) {
                 printf("\nConnected Users:\n");
                 for (size_t i = 0; i < user_list->n_users; i++) {
                     print_user_info(user_list->users[i]->username);
-                    printf("Status: %s\n", status_names[user_list->users[i]->status]);  // Imprime el estado del usuario como texto
+                    printf("Status: %s\n", status_names[user_list->users[i]->status]);
                 }
                 chat__response__free_unpacked(response, NULL);
-                return 0;  // Éxito
+                return 0;
             }
 
             chat__response__free_unpacked(response, NULL);
@@ -357,21 +357,21 @@ void enter_chatroom(int sockfd) {
 
         switch (option) {
             case 1:
-                printf("Enter your message: ");
+                printf("\nEnter your message: ");
                 char message[256];
                 fgets(message, sizeof(message), stdin);
-                message[strcspn(message, "\n")] = 0; // Remove newline character
+                message[strcspn(message, "\n")] = 0;
                 send_broadcast_message(sockfd, message);
                 break;
             case 2:
-                printf("Enter the username to send message: ");
+                printf("\nEnter the username to send message: ");
                 char recipient[32];
                 fgets(recipient, sizeof(recipient), stdin);
-                recipient[strcspn(recipient, "\n")] = 0;  // Remove newline character
+                recipient[strcspn(recipient, "\n")] = 0;
 
-                printf("Enter your message: ");
+                printf("\nEnter your message: ");
                 fgets(message, sizeof(message), stdin);
-                message[strcspn(message, "\n")] = 0;  // Remove newline character
+                message[strcspn(message, "\n")] = 0;
 
                 send_direct_message(sockfd, recipient, message);
                 break;
@@ -437,7 +437,7 @@ int main(int argc, char *argv[]) {
                 break;
             case 2:
                 // Change status
-                printf("Choose new status (0: ONLINE, 1: BUSY, 2: OFFLINE): ");
+                printf("\nChoose new status (0: ONLINE, 1: BUSY, 2: OFFLINE): \n");
                 int new_status;
                 scanf("%d", &new_status);
                 char* status_names[] = {"ONLINE", "BUSY", "OFFLINE"};
@@ -455,7 +455,7 @@ int main(int argc, char *argv[]) {
             case 3:
                 // Solicitar la lista de usuarios conectados
                 {
-                    Chat__UserListRequest user_list_request = CHAT__USER_LIST_REQUEST__INIT; // Correcto uso de la inicialización
+                    Chat__UserListRequest user_list_request = CHAT__USER_LIST_REQUEST__INIT;
                     user_list_request.username = NULL;  // Solicitar todos los usuarios
 
                     Chat__Request request = CHAT__REQUEST__INIT;
@@ -479,7 +479,7 @@ int main(int argc, char *argv[]) {
                 {
                     // Obtener información de un usuario específico
                     char username[32];
-                    printf("Enter the username to get information: ");
+                    printf("\nEnter the username to get information: ");
                     fgets(username, sizeof(username), stdin);
                     username[strcspn(username, "\n")] = 0; // Remove newline character
 
