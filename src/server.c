@@ -171,14 +171,14 @@ void broadcast_message(char *sender_name, char *message_content) {
     pthread_mutex_lock(&clients_mutex);
 
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i] && strcmp(clients[i]->name, sender_name) != 0) {
+        // Agregar la verificación de que el cliente está en línea
+        if (clients[i] && strcmp(clients[i]->name, sender_name) != 0 && clients[i]->status != INACTIVO) {
             char formatted_message[1024];
-            snprintf(formatted_message, sizeof(formatted_message), "\033[1m\033[35m\n\tBROADCAST [%s]:\033[0m %s", sender_name, message_content);
 
             // Crear la estructura del mensaje entrante
             Chat__IncomingMessageResponse msg = CHAT__INCOMING_MESSAGE_RESPONSE__INIT;
             msg.sender = sender_name;
-            msg.content = formatted_message; // Usar el mensaje formateado para broadcast
+            msg.content = message_content;
             msg.type = CHAT__MESSAGE_TYPE__BROADCAST;
 
             Chat__Response response = CHAT__RESPONSE__INIT;
@@ -202,47 +202,63 @@ void broadcast_message(char *sender_name, char *message_content) {
 }
 
 void send_direct_message_to_client(client_t *cli, const char *recipient, const char *message_content) {
+    bool found = false;
     bool sent = false;
-    pthread_mutex_lock(&clients_mutex);
+    Chat__Response response = CHAT__RESPONSE__INIT;
+    Chat__IncomingMessageResponse msg = CHAT__INCOMING_MESSAGE_RESPONSE__INIT;
+
+    pthread_mutex_lock(&clients_mutex);  // Bloquear el mutex para acceder a la lista de clientes
     for (int i = 0; i < MAX_CLIENTS; i++) {
-        if (clients[i] && strcmp(clients[i]->name, recipient) == 0 && clients[i]->status != INACTIVO) {
-            char formatted_message[1024];
-            snprintf(formatted_message, sizeof(formatted_message), "\033[1m\033[36m\n\tDIRECT [%s]:\033[0m %s", cli->name, message_content);
+        if (clients[i] && strcmp(clients[i]->name, recipient) == 0) {
+            found = true;  // Marcamos que hemos encontrado al usuario
+            if (clients[i]->status != INACTIVO) {
+                // Preparar el mensaje de chat directo
+                msg.sender = cli->name;
+                msg.content = message_content;
+                msg.type = CHAT__MESSAGE_TYPE__DIRECT;
 
-            // Crear la estructura del mensaje entrante
-            Chat__IncomingMessageResponse msg = CHAT__INCOMING_MESSAGE_RESPONSE__INIT;
-            msg.sender = cli->name;
-            msg.content = formatted_message; // Usar el mensaje formateado
-            msg.type = CHAT__MESSAGE_TYPE__DIRECT;
+                response.operation = CHAT__OPERATION__INCOMING_MESSAGE;
+                response.status_code = CHAT__STATUS_CODE__OK;
+                response.result_case = CHAT__RESPONSE__RESULT_INCOMING_MESSAGE;
+                response.incoming_message = &msg;
 
-            Chat__Response response = CHAT__RESPONSE__INIT;
-            response.operation = CHAT__OPERATION__INCOMING_MESSAGE;
-            response.status_code = CHAT__STATUS_CODE__OK;
-            response.result_case = CHAT__RESPONSE__RESULT_INCOMING_MESSAGE;
-            response.incoming_message = &msg;
+                // Serializar y enviar el mensaje
+                size_t len = chat__response__get_packed_size(&response);
+                uint8_t *buf = malloc(len);
+                chat__response__pack(&response, buf);
+                send(clients[i]->sockfd, buf, len, 0);
+                free(buf);
 
-            // Serializar y enviar el mensaje
-            size_t len = chat__response__get_packed_size(&response);
-            uint8_t *buf = malloc(len);
-            chat__response__pack(&response, buf);
-            send(clients[i]->sockfd, buf, len, 0);
-            free(buf);
-
-            // Indicar que el mensaje ha sido enviado
-            sent = true;
-            break;
+                sent = true;
+                break;
+            }
         }
     }
-    pthread_mutex_unlock(&clients_mutex);
+    pthread_mutex_unlock(&clients_mutex);  // Desbloquear el mutex
 
-    // Confirmar al emisor del mensaje si fue enviado o no
-    char feedback_msg[256];
-    if (sent) {
-        //snprintf(feedback_msg, sizeof(feedback_msg), "\n\n\t\033[32mMessage sent successfully to [%s].\033[0m", recipient);
-    } else {
-        snprintf(feedback_msg, sizeof(feedback_msg), "\n  \033[34mUser [%s] not found or is offline.\033[0m", recipient);
+    // Configurar la respuesta dependiendo del resultado del envío
+    if (!found) {
+        response.status_code = CHAT__STATUS_CODE__BAD_REQUEST;
+        msg.sender = "Server";
+        msg.content = "User not found.";
+        msg.type = CHAT__MESSAGE_TYPE__DIRECT;
+    } else if (!sent) {
+        response.status_code = CHAT__STATUS_CODE__BAD_REQUEST;
+        msg.sender = "Server";
+        msg.content = "User is offline.";
+        msg.type = CHAT__MESSAGE_TYPE__DIRECT;
     }
-    send(cli->sockfd, feedback_msg, strlen(feedback_msg), 0);
+
+    response.operation = CHAT__OPERATION__INCOMING_MESSAGE;
+    response.result_case = CHAT__RESPONSE__RESULT_INCOMING_MESSAGE;
+    response.incoming_message = &msg;
+
+    // Serializar y enviar la respuesta al emisor
+    size_t final_len = chat__response__get_packed_size(&response);
+    uint8_t *final_buf = malloc(final_len);
+    chat__response__pack(&response, final_buf);
+    send(cli->sockfd, final_buf, final_len, 0);
+    free(final_buf);
 }
 
 
@@ -286,7 +302,7 @@ void *handle_client(void *arg) {
                 if (req->payload_case == CHAT__REQUEST__PAYLOAD_GET_USERS) {
                     // Se envía la solicitud completa
                     send_user_list(cli->sockfd, req->get_users);
-                    printf("\033[34m\nUser list sent to [%s]\n\033[34m", cli->name);
+                    printf("\033[34m\nUser list sent to [%s]\n\033[0m", cli->name);
                 } else {
                     // En caso de que no haya detalles = NULL
                     send_user_list(cli->sockfd, NULL);
@@ -301,7 +317,7 @@ void *handle_client(void *arg) {
                             ClientStatus old_status = clients[i]->status; // Guarda el estado antiguo
                             clients[i]->status = req->update_status->new_status; // Actualiza al nuevo estado
                             send_response(cli->sockfd, CHAT__STATUS_CODE__OK, "\n\033[32mStatus updated successfully!\033[0m");
-                            printf("\033[34m\nUpdated status for %s from %s to %s\n\033[34m", clients[i]->name, get_status_name(old_status), get_status_name(clients[i]->status));
+                            printf("\033[34m\nUpdated status for %s from %s to %s\n\033[0m", clients[i]->name, get_status_name(old_status), get_status_name(clients[i]->status));
                             break;
                         }
                     }
@@ -315,11 +331,11 @@ void *handle_client(void *arg) {
                     if (strlen(req->send_message->recipient) > 0) {
                         // Enviar a un usuario específico
                         send_direct_message_to_client(cli, req->send_message->recipient, req->send_message->content);
-                        printf("\033[34m\nDirect Message sent from [%s] to [%s]\n\033[34m", cli->name, req->send_message->recipient);
+                        printf("\033[34m\nDirect Message sent from [%s] to [%s]\n\033[0m", cli->name, req->send_message->recipient);
                     } else {
                         // Broadcast message
                         broadcast_message(cli->name, req->send_message->content);
-                        printf("\033[34m\nBroadcast message sent by [%s]\n\033[34m", cli->name);
+                        printf("\033[34m\nBroadcast message sent by [%s]\n\033[0m", cli->name);
                     }
                 }
                 break;
@@ -362,7 +378,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    printf("\033[32mServer started on port %d\n\033[32m", port); 
+    printf("\033[32mServer started on port %d\n\033[0m", port); 
     pthread_t tid_inactivity;
     pthread_create(&tid_inactivity, NULL, &check_inactivity, NULL); 
 
@@ -385,7 +401,7 @@ int main(int argc, char *argv[]) {
                 if (!username_exists(req->register_user->username)) {
                     strcpy(cli->name, req->register_user->username);
                     cli->uid = uid++;
-                    printf("\033[32m\n(*) New connection: %s (IP: %s)\n\033[32m", cli->name, inet_ntoa(cli->address.sin_addr));
+                    printf("\033[32m\n(*) New connection: %s (IP: %s)\n\033[0m", cli->name, inet_ntoa(cli->address.sin_addr));
                     add_client(cli);
                     send_response(cli->sockfd, CHAT__STATUS_CODE__OK, "\033[32mRegistration successful\033[0m");
                     pthread_t tid;

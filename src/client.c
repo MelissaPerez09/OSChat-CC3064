@@ -48,10 +48,10 @@ Parametros:
 void print_user_info(char* full_username) {
     char* token = strtok(full_username, "@");
     if (token != NULL) {
-        printf("User: %s", token);  // Imprime el nombre del usuario
+        printf("\033[33mUser:\033[0m %s", token);  // Imprime el nombre del usuario
         token = strtok(NULL, "@");
         if (token != NULL) {
-            printf("\tIP: %s", token);  // Imprime la dirección IP
+            printf("\033[34m\tIP:\033[0m %s", token);  // Imprime la dirección IP
         }
     }
 }
@@ -132,7 +132,7 @@ int request_user_list(int sockfd) {
                 for (size_t i = 0; i < user_list->n_users; i++) {
                     //printf("User: %s, Status: %d\n", user_list->users[i]->username, user_list->users[i]->status);
                     print_user_info(user_list->users[i]->username);
-                    printf("\tStatus: %s\n", status_names[user_list->users[i]->status]);   // Imprime el estado del usuario
+                    printf("\033[32m\tStatus:\033[0m %s\n", status_names[user_list->users[i]->status]);   // Imprime el estado del usuario
                 }
                 chat__response__free_unpacked(response, NULL);
                 return 0;  // Success
@@ -210,7 +210,8 @@ Retornos:
 void *receive_messages(void *sockfd_ptr) {
     int sockfd = *(int *)sockfd_ptr;
     fd_set readfds;
-    char buffer[1024];
+    uint8_t buffer[1024];
+    char formatted_message[1024];
 
     while (keep_receiving) {
         FD_ZERO(&readfds);
@@ -223,14 +224,37 @@ void *receive_messages(void *sockfd_ptr) {
         int result = select(sockfd + 1, &readfds, NULL, NULL, &tv);
 
         if (result > 0 && FD_ISSET(sockfd, &readfds)) {
-            clear_buffer((uint8_t *)buffer, sizeof(buffer));
+            clear_buffer(buffer, sizeof(buffer));
             int len = recv(sockfd, buffer, sizeof(buffer), 0);
             if (len > 0) {
-                // Verificamos si el usuario está en el chatroom antes de imprimir el mensaje
-                if (in_chatroom) {
-                    printf("%s\n", buffer); // Imprime el mensaje recibido
+                // Desempaquetamos el mensaje
+                Chat__Response *response;
+                response = chat__response__unpack(NULL, len, buffer);
+                if (response == NULL) {
+                    fprintf(stderr, "error unpacking incoming message\n");
+                    exit(1);
                 }
-            } else if (len == 0) {
+
+                // Verificamos si el usuario está en el chatroom antes de imprimir el mensaje
+                if (in_chatroom && response->result_case == CHAT__RESPONSE__RESULT_INCOMING_MESSAGE) {
+                    Chat__IncomingMessageResponse *msg = response->incoming_message;
+
+                    // Verificamos si el mensaje es directo o de broadcast
+                    if (strcmp(msg->sender, "Server") == 0) {
+                        // Si el remitente es "Server", entonces es un mensaje de feedback
+                        printf("%s\n", msg->content);
+                    } else if (msg->type == CHAT__MESSAGE_TYPE__DIRECT) {
+                        snprintf(formatted_message, sizeof(formatted_message), "\033[1m\033[36m\n\tDIRECT [%s]:\033[0m %s", msg->sender, msg->content);
+                    } else {
+                        snprintf(formatted_message, sizeof(formatted_message), "\033[1m\033[35m\n\tBROADCAST [%s]:\033[0m %s", msg->sender, msg->content);
+                    }
+                    printf("%s\n", formatted_message); // Imprime el mensaje formateado
+                }
+
+                // Liberamos el mensaje
+                chat__response__free_unpacked(response, NULL);
+            }
+            else if (len == 0) {
                 printf("Server closed the connection.\n");
                 break;
             } else if (len < 0) {
@@ -286,7 +310,7 @@ int receive_user_info_response(int sockfd) {
                 print_user_info(user_list->users[0]->username);
                 //printf("Status: %d\n", user_list->users[0]->status);
                 for (size_t i = 0; i < user_list->n_users; i++) {
-                    printf("\tStatus: %s\n", status_names[user_list->users[i]->status]);
+                    printf("\033[32m\tStatus:\033[0m %s\n", status_names[user_list->users[i]->status]);
                 }
             } else {
                 printf("No user found.\n");
@@ -321,7 +345,7 @@ int receive_server_response(int sockfd) {
                 printf("\nConnected Users:\n");
                 for (size_t i = 0; i < user_list->n_users; i++) {
                     print_user_info(user_list->users[i]->username);
-                    printf("\tStatus: %s\n", status_names[user_list->users[i]->status]);
+                    printf("\033[32m\tStatus:\033[0m %s\n", status_names[user_list->users[i]->status]);
                 }
                 chat__response__free_unpacked(response, NULL);
                 return 0;
@@ -385,6 +409,9 @@ void enter_chatroom(int sockfd) {
                 break;
             case 3:
                 printf("Exiting chatroom...\n");
+                break;
+            default:
+                printf("Invalid option. Please try again.\n");
                 break;
         }
     } while (option != 3);
