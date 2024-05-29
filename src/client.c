@@ -218,8 +218,8 @@ void *receive_messages(void *sockfd_ptr) {
         FD_SET(sockfd, &readfds);
 
         struct timeval tv;
-        tv.tv_sec = 0;  // Espera activa corta para mantener la reactividad
-        tv.tv_usec = 500000; // 500 milisegundos
+        tv.tv_sec = 1;  // Espera de 1 segundo
+        tv.tv_usec = 0; // 0 milisegundos
 
         int result = select(sockfd + 1, &readfds, NULL, NULL, &tv);
 
@@ -227,45 +227,36 @@ void *receive_messages(void *sockfd_ptr) {
             clear_buffer(buffer, sizeof(buffer));
             int len = recv(sockfd, buffer, sizeof(buffer), 0);
             if (len > 0) {
-                // Desempaquetamos el mensaje
-                Chat__Response *response;
-                response = chat__response__unpack(NULL, len, buffer);
-                if (response == NULL) {
-                    fprintf(stderr, "error unpacking incoming message\n");
-                    exit(1);
-                }
-
-                // Verificamos si el usuario está en el chatroom antes de imprimir el mensaje
-                if (in_chatroom && response->result_case == CHAT__RESPONSE__RESULT_INCOMING_MESSAGE) {
-                    Chat__IncomingMessageResponse *msg = response->incoming_message;
-
-                    // Verificamos si el mensaje es directo o de broadcast
-                    if (strcmp(msg->sender, "Server") == 0) {
-                        // Si el remitente es "Server", entonces es un mensaje de feedback
-                        printf("%s\n", msg->content);
-                    } else if (msg->type == CHAT__MESSAGE_TYPE__DIRECT) {
-                        snprintf(formatted_message, sizeof(formatted_message), "\033[1m\033[36m\n\tDIRECT [%s]:\033[0m %s", msg->sender, msg->content);
-                    } else {
-                        snprintf(formatted_message, sizeof(formatted_message), "\033[1m\033[35m\n\tBROADCAST [%s]:\033[0m %s", msg->sender, msg->content);
+                Chat__Response *response = chat__response__unpack(NULL, len, buffer);
+                if (response) {
+                    if (in_chatroom && response->result_case == CHAT__RESPONSE__RESULT_INCOMING_MESSAGE) {
+                        Chat__IncomingMessageResponse *msg = response->incoming_message;
+                        if (msg->type == CHAT__MESSAGE_TYPE__DIRECT) {
+                            snprintf(formatted_message, sizeof(formatted_message), "\033[1m\033[36m\n\tDIRECT [%s]:\033[0m %s", msg->sender, msg->content);
+                        } else {
+                            snprintf(formatted_message, sizeof(formatted_message), "\033[1m\033[35m\n\tBROADCAST [%s]:\033[0m %s", msg->sender, msg->content);
+                        }
+                        printf("%s\n", formatted_message);
                     }
-                    printf("%s\n", formatted_message); // Imprime el mensaje formateado
+                    chat__response__free_unpacked(response, NULL);
                 }
-
-                // Liberamos el mensaje
-                chat__response__free_unpacked(response, NULL);
-            }
-            else if (len == 0) {
+            } else if (len == 0) {
                 printf("Server closed the connection.\n");
                 break;
             } else if (len < 0) {
                 perror("recv failed");
                 break;
             }
+        } else if (result == 0) {
+            // Timeout: No data available within 1 second
+            continue;
         }
     }
 
     return NULL;
 }
+
+
 
 /*
 Funcion que envía un mensaje directo a un usuario específico.
@@ -540,7 +531,7 @@ int main(int argc, char *argv[]) {
                 break;
             case 5:
                 // Display help
-                printf("\nHELP!: \n1 - Broadcast message to all\n2 - Send a direct message to a user\n3 - Change your status\n4 - View all connected users in the server\n5 - Get information about a specific user\n6 - Display this help\n7 - Exit the chat\n");
+                printf("\nHELP!: \n1 - Enter the chatroom to send and receive messages\n2 - Change your status\n3 - View all connected users in the server\n4 - Get information about a specific user\n5 - Display this help\n6 - Exit the chat\n");
                 break;
             case 6:
                 // Exit the chat
